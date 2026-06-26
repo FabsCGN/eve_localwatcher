@@ -1,0 +1,9 @@
+# EVE Local Intel Scanner — runtime dependencies
+# GUI (Tkinter) and sound (winsound) are part of the Python standard library on Windows.
+
+mss>=9.0.1          # fast screen capture
+numpy>=1.24         # pixel math / median sampling
+Pillow>=10.0        # OCR pre-processing (upscale/threshold)
+pytesseract>=0.3.10 # header-count OCR (requires the Tesseract binary, see README)
+pywin32>=306        # find the EVE window + DPI/virtual-screen helpers (Windows only)
+requests>=2.31      # ESI + zKillboard threat-check enrichment (opt-in feature)

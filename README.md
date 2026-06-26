@@ -1,0 +1,194 @@
+# Mister Lee's magischer Intelligentheit-Helfer
+
+Eine passive Desktop-App, die den **Local-Chat eines laufenden EVE-Clients per
+Screen-Capture überwacht** und **Alarm auslöst, sobald ein nicht-befreundeter
+Pilot im Local erscheint** — unabhängig davon, ob er etwas schreibt.
+
+Der Alarm feuert **beim Erscheinen**, nicht erst bei einer Chat-Nachricht.
+
+## Wie es funktioniert
+
+Erkennung ist zweistufig und arbeitsteilig:
+
+1. **Header-Count (Stufe 1):** OCR der Zahl im Local-Header. Steigt der Count →
+   jemand ist rein → Alarm. Das ist die **primäre Neuzugangs-Erkennung** — sie
+   fängt auch den Neut-Hunter ohne Standing-Icon und Piloten unterhalb des
+   sichtbaren Bereichs.
+2. **Color-Sampling (Stufe 2):** Pro Zeile wird die Farbe der Standing-/Tag-Icon-
+   Spalte ganz links gesampelt und klassifiziert in **friendly / threat / empty**:
+   - **empty** — Slot ist dunkler als die *Tag-Schwelle* (`tag_min_value`): es
+     sitzt gar kein farbiges Icon dort → **kein Alarm**.
+   - **friendly** — Farbe ist in der kalibrierten Whitelist → kein Alarm.
+   - **threat** — ein *vorhandenes* Icon, dessen Farbe **nicht** friendly ist →
+     **Alarm** (z. B. Rot/Orange/Grau).
+
+   > Wichtig: Leere/dunkle Slots lösen **keinen** Alarm aus. Das verhindert
+   > Phantom-Alarme, wenn sich die gesampelte Zeile verschiebt (z. B. beim
+   > Multiboxing / Client-Wechsel verschiebt sich der aktive Spieler). Die
+   > Erkennung von Neuzugängen ohne Icon übernimmt Stufe 1 (Header-Count).
+
+## Installation (Windows)
+
+```powershell
+# 1. Abhängigkeiten
+python -m pip install -r requirements.txt
+
+# 2. Tesseract OCR (für Stufe 1 / Header-Count) — einmalig:
+#    https://github.com/UB-Mannheim/tesseract/wiki
+#    Standardpfad: C:\Program Files\Tesseract-OCR\tesseract.exe
+#    Liegt es woanders, in der config.json unter "tesseract_cmd" eintragen.
+```
+
+> Ohne Tesseract läuft die App weiter — Stufe 1 (Header-Count) ist dann
+> deaktiviert, Stufe 2 (Color-Sampling) funktioniert. Bei der Kalibrierung wird
+> dann nach der Pilotenzahl gefragt.
+
+## Starten
+
+Drei Wege — vom bequemsten zum entwicklernächsten:
+
+**1. Als ausführbare Datei (.exe, kein Python nötig)**
+Einmalig bauen:
+```powershell
+.\build_exe.ps1
+```
+Ergebnis: `dist\Mister Lees magischer Intelligentheit-Helfer.exe` — frei
+verschiebbar (z. B. auf den Desktop) und per **Doppelklick** startbar, ohne
+Terminal. (Tesseract bleibt eine separate Installation, siehe oben; die .exe
+findet es automatisch.) Das Icon stammt aus `icon.ico` im Projektordner —
+ersetze diese Datei durch dein eigenes Bild, um das App-Icon zu ändern.
+
+**2. Doppelklick-Starter (Python installiert, kein Build)**
+`Flint Local Watcher.pyw` doppelklicken — läuft über `pythonw`, also ohne
+Konsolenfenster.
+
+**3. Per Terminal (Entwicklung)**
+```powershell
+python -m eve_localwatcher
+```
+
+## Bedienung
+
+Oben eine **permanente Live-Bahn**: eine große Status-Bahn (grau = gestoppt,
+grün = sicher, rot = Hostile), darunter die Live-Werte und der **Start/Stop**-
+Knopf. Start ist **deaktiviert**, bis die Einrichtung steht — eine Zeile zeigt
+den nächsten Schritt an.
+
+Die ganze Einrichtung liegt in **Tabs** darunter:
+- **Erfassung** — EVE-Fenster, Capture-Bereiche, Zeilen-/Icon-Layout, Namens-OCR
+- **Erkennung** — Kalibrierung, Tag-Schwelle, Toleranz (mit Live-Vorschau)
+- **Alarm & Haven** — Hostile-Local-Alarm, Sounds, Popup-Platzierung, Dread-Watch
+- **Threat-Check** — SSO-Login, Zwischenablage-Check, Auto-Threat
+- **Log** — Verlauf & Debug-Ausgabe
+
+**Jedes Feature ist einzeln zuschaltbar** — du musst nicht alles nutzen:
+- **Hostile-Local-Alarm** (Tab *Alarm & Haven*) — Header-Count + Farb-Sampling
+- **Haven Dread-Watch** (Tab *Alarm & Haven*) — Pocket-Counter `N/M`
+- **Threat-Check** (Tab *Threat-Check*) — manuelle Bewertung per Zwischenablage
+- **Auto-Threat** (Tab *Threat-Check*) — liest bei einem Neut die Namen per OCR
+  und startet den Threat-Check automatisch
+
+Der **Start**-Knopf treibt die Scan-Features (Local-Alarm / Haven / Auto-Threat);
+der manuelle Threat-Check läuft unabhängig über seinen eigenen Knopf. Sind nur
+einzelne Features aktiv, verlangt die App auch nur deren Einrichtung (z. B. „nur
+Haven" braucht keine Farb-Kalibrierung).
+
+## Erste Einrichtung
+
+1. **EVE windowed** starten, Local-Memberliste sichtbar machen (festes Layout).
+   Beim Multiboxing im Dropdown **„EVE-Fenster" genau einen Client wählen**
+   (voller Titel `EVE - Charname`). Sonst würde der Scan dem jeweils obersten
+   Client folgen und die fensterrelativen Bereiche zeigten auf den falschen
+   Client. ⟳ aktualisiert die Liste.
+2. **„Pilotenliste festlegen"** → Rechteck über die Memberliste ziehen
+   (Icon-Spalte links + Namen).
+3. **„Header (Local [N]) festlegen"** → Rechteck **nur über die Zahl** ziehen
+   (das Personen-Icon links **weglassen** — es stört das OCR). Der Member-Count
+   wird als blanke Zahl neben dem Icon gerendert, nicht als `Local [N]`.
+4. **Zeilen-/Icon-Layout** justieren:
+   - `Icon X-Offset` / `Icon Sample-Breite`: nur die **schmale Icon-Spalte ganz
+     links** treffen — **niemals** den Zeilenhintergrund (eine angeklickte Zeile
+     hat einen roten/dunklen Hintergrund und würde sonst als Hostile gewertet).
+   - `Zeilenhöhe` / `Erste Zeile Y-Offset`: so einstellen, dass jede Zeile mittig
+     getroffen wird.
+5. In einem **ruhigen Moment** (nur eigene Alts + bekannte Friendlies im Local):
+   **„Aktuelles Local als sicher merken"** → die vorkommenden Icon-Farben werden
+   als Friendly-Set gespeichert.
+6. **„▶ Start"**.
+
+## Haven / Dread-Watch (optional, zweiter Detektor)
+
+Eine Haven hat 6 Pockets; in der letzten kann ein Dreadnought spawnen. Dieser
+opt-in Detektor liest den Pocket-Counter (`N/M`, z. B. `6/6`) und löst beim
+Erreichen der letzten Pocket einen **eigenen Alarm mit separatem Sound** und
+einem **Bernstein-Overlay** aus — als Erinnerung, auf einen Dread zu prüfen.
+
+- Frame **„Haven / Dread-Watch"**: aktivieren, **„Counter-Bereich festlegen"**
+  (Rechteck **nur um die Zahl** `N/M`, den grünen Balken weglassen), eigenen
+  **Dread-Sound** wählen.
+- **Trigger generisch bei N = M** — funktioniert auch bei abweichender
+  Pocket-Zahl. „Erwartete Pockets" (Default 6) dient nur Anzeige/Validierung.
+- Feuert **einmal** beim Erreichen der letzten Pocket; sinkt der Zähler wieder
+  (neue Haven ab `1/6`), wird der Alarm neu scharf.
+- Läuft im selben Scan-Loop wie der Hostile-Scan; Hostile- und Dread-Alarm
+  können gleichzeitig erscheinen (gestapelte Overlays).
+
+## Konfiguration
+
+Wird automatisch unter `%USERPROFILE%\.eve_localwatcher\config.json` gespeichert.
+`config.example.json` zeigt alle Felder. Wichtige Parameter:
+
+| Feld | Bedeutung |
+|---|---|
+| `capture_region`, `header_region` | Bereiche, **relativ zum Fenster** (übersteht Verschieben) |
+| `icon_column_x_offset`, `icon_sample_width` | wo die Icon-Spalte gesampelt wird |
+| `row_height`, `first_row_y_offset` | Zeilenraster |
+| `friendly_colors[]` | kalibrierte Whitelist (nicht hardcoden) |
+| `color_tolerance` | HSV-Feature-Distanz (Default 18). Zu eng → Fehlalarme |
+| `tag_min_value` | Helligkeitsschwelle (Default 70). Slot dunkler als das ⇒ „leer", kein Alarm. Trennt echte Icons vom dunklen Hintergrund |
+| `scan_interval_ms` | Loop-Intervall (Default 750) |
+| `alarm_sound_path` | optionaler WAV; sonst System-Beep |
+| `auto_learn_enabled` | **Default aus** — ein still sitzender Hostile würde sonst als safe gelernt |
+
+## Alarm-Popups platzieren
+
+Die Capture erfolgt über **Bildschirm-Pixel** — liegt ein Alarm-Popup über
+einem Capture-Bereich, liest der nächste Scan das Popup und löst erneut Alarm
+aus (Rückkopplung). Deshalb beide Popups **weg von den Bereichen** legen:
+
+- „Hostile-Popup platzieren" (Frame *Alarm & Loop*) bzw. „Dread-Popup
+  platzieren" (Frame *Haven*) klicken → das Popup erscheint → **ziehen** →
+  **Doppelklick speichert** die Position (pro Monitor, übersteht Neustart).
+- Ohne gespeicherte Position erscheinen die Popups oben-zentriert.
+
+## Bekannte Fallstricke (im Tool behandelt)
+
+- **Selection-Highlight ≠ Standing-Farbe** → es wird nur die schmale Icon-Spalte
+  gesampelt, nie der Zeilenhintergrund.
+- **Local scrollt bei vollem System** → Header-Count (Stufe 1) kompensiert.
+- **Leere Slots unterhalb der Pilotenliste** → die Zeilenanzahl wird durch den
+  Header-Count begrenzt, damit leerer Listen-Hintergrund nicht als „Neutral"
+  fehlgewertet wird.
+- **DPI-Scaling** → Prozess wird beim Start per-monitor DPI-aware gesetzt, damit
+  Auswahl- und Capture-Koordinaten übereinstimmen.
+
+## Noch nicht enthalten (nach MVP)
+
+Enrichment via ESI/zKillboard, Namen-OCR, Watchlist (Named-Targets). Auto-Learn
+ist vorhanden, aber standardmäßig aus.
+
+## Projektstruktur
+
+```
+eve_localwatcher/
+  __main__.py      # Einstieg: DPI-aware + App starten
+  app.py           # Tkinter-Control-Panel + Alarm-Overlay (Main-Thread)
+  scanner.py       # Scan-Loop: Stufe 1 + 2, Debounce, Auto-Learn (Worker-Thread)
+  capture.py       # mss-Screen-Capture
+  color.py         # HSV-Feature-Distanz + Friendly-Test
+  ocr.py           # Header-Count via Tesseract (graceful fallback)
+  alarm.py         # akustischer Alarm (winsound)
+  region_select.py # Vollbild-Rechteck-Auswahl
+  winutil.py       # DPI, Fenstersuche, Virtual-Screen
+  config.py        # Config-Modell + JSON-Persistenz
+```
