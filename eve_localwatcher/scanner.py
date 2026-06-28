@@ -52,7 +52,10 @@ class TickResult:
     cap_region: Optional[Tuple[int, int, int, int]] = None  # resolved abs region
     haven_stage: Optional[int] = None   # current Haven pocket (N in "N/M")
     haven_total: Optional[int] = None   # total pockets (M)
-    haven_reached: bool = False         # just reached the final pocket (N==M)
+    haven_reached: bool = False         # just reached the final pocket → last-wave alarm
+    last_wave: bool = False             # currently on the final pocket (detectors armed)
+    dread_spawn: bool = False           # Dread/Titan overview went empty → populated
+    faction_spawn: bool = False         # Faction overview went empty → populated
     threat_names: List[str] = field(default_factory=list)  # OCR'd names (auto-threat)
     error: Optional[str] = None
 
@@ -156,6 +159,12 @@ class Scanner:
         # haven: armed until we fire on the final pocket; re-armed below it
         self._haven_armed: bool = True
         self._haven_none_streak: int = 0
+        self._haven_last_stage: Optional[int] = None  # last accepted N (monotonic filter)
+        self._last_wave_active: bool = False           # on the final pocket right now
+        # last-wave spawn detectors: armed while their overview is empty, fire once
+        # when it becomes populated, re-arm when it empties again.
+        self._dread_armed: bool = True
+        self._faction_armed: bool = True
 
     # ---------------------------------------------------------------- lifecycle
     def start(self) -> None:
@@ -182,6 +191,10 @@ class Scanner:
         self._last_alarmed_count = self.cfg.baseline_count
         self._haven_armed = True
         self._haven_none_streak = 0
+        self._haven_last_stage = None
+        self._last_wave_active = False
+        self._dread_armed = True
+        self._faction_armed = True
 
     # -------------------------------------------------------------------- loop
     def _run(self) -> None:
@@ -195,7 +208,8 @@ class Scanner:
                     result = self._tick(cap)
                     self._on_tick(result)
                     if result.ok and (result.new_threat or result.count_increased
-                                      or result.haven_reached):
+                                      or result.haven_reached or result.dread_spawn
+                                      or result.faction_spawn):
                         self._on_alarm(result)
                 except Exception as e:  # pragma: no cover - defensive
                     try:
@@ -282,34 +296,98 @@ class Scanner:
                     self._haven_none_streak += 1
                     if self._haven_none_streak >= 3:
                         self._haven_armed = True
+                        self._haven_last_stage = None
+                        self._end_last_wave()
                 else:
                     self._haven_none_streak = 0
                     haven_stage, haven_total = frac
                     haven_reached = self._update_haven(haven_stage, haven_total)
 
+        # --- Stage 4: last-wave spawn detectors (gated on the final pocket) ---
+        dread_spawn = faction_spawn = False
+        if self._last_wave_active:
+            if self.cfg.dread_enabled:
+                dread_spawn = self._detect_spawn(cap, self.cfg.dread_region, "dread")
+            if self.cfg.faction_enabled:
+                faction_spawn = self._detect_spawn(cap, self.cfg.faction_region,
+                                                   "faction")
+
         return TickResult(
             ok=True, window_found=window_found, count=count, rows=rows,
             threats=threats, new_threat=new_threat, count_increased=count_increased,
             cap_region=cap_region, haven_stage=haven_stage, haven_total=haven_total,
-            haven_reached=haven_reached, threat_names=threat_names)
+            haven_reached=haven_reached, last_wave=self._last_wave_active,
+            dread_spawn=dread_spawn, faction_spawn=faction_spawn,
+            threat_names=threat_names)
 
     # --------------------------------------------------------------- haven
     def _update_haven(self, current: int, total: int) -> bool:
         """Fire once when the counter reaches the final pocket (N == M).
 
+        Filters OCR noise that a panning camera produces:
+          * the total must equal the expected pocket count (e.g. a read of
+            ``9/6`` or ``6/8`` is impossible and dropped);
+          * ``current`` must be within ``1..total`` (no ``7/6``);
+          * the pocket must follow the sequence — same value, the next value
+            (``+1``), or a reset to ``1`` for a fresh site. A jump like
+            ``2 → 5`` is an OCR error and ignored.
+
         Re-arms as soon as the counter drops below the final pocket (a new
-        Haven starting again). Implausible totals are ignored.
+        Haven starting again).
         """
-        if not (2 <= total <= 20) or current is None:
+        expected = self.cfg.haven_expected_total
+        if current is None or total != expected or not (1 <= current <= total):
             return False
+        last = self._haven_last_stage
+        if last is not None and current not in (last, last + 1, 1):
+            return False  # implausible jump → OCR error
+        self._haven_last_stage = current
+
         at_final = current >= total
         reached = False
-        if at_final and self._haven_armed:
-            reached = True
-            self._haven_armed = False
-        elif not at_final:
+        if at_final:
+            self._last_wave_active = True
+            if self._haven_armed:
+                reached = True
+                self._haven_armed = False
+        else:
             self._haven_armed = True
+            self._end_last_wave()
         return reached
+
+    def _end_last_wave(self) -> None:
+        """Leave the last wave: disable spawn detectors and re-arm them so the
+        first spawn of the *next* last wave fires cleanly."""
+        self._last_wave_active = False
+        self._dread_armed = True
+        self._faction_armed = True
+
+    # ------------------------------------------------------- spawn detectors
+    def _detect_spawn(self, cap: "Capturer", region, which: str) -> bool:
+        """True once when ``region``'s overview goes from empty to populated.
+
+        Presence is brightness-based: a populated overview row lights up pixels
+        above the dark background. Fires once, re-arms when the overview empties.
+        """
+        reg = resolve_one(self.cfg, region)
+        if reg is None:
+            return False
+        try:
+            img = cap.grab(reg)
+        except Exception:
+            return False
+        gray = (0.299 * img[:, :, 0] + 0.587 * img[:, :, 1]
+                + 0.114 * img[:, :, 2])
+        lit = int((gray > self.cfg.spawn_brightness_thr).sum())
+        populated = lit >= self.cfg.spawn_min_bright_px
+        armed_attr = f"_{which}_armed"
+        if populated:
+            if getattr(self, armed_attr):
+                setattr(self, armed_attr, False)
+                return True
+        else:
+            setattr(self, armed_attr, True)
+        return False
 
     # ------------------------------------------------------------- debounce
     def _update_threat_debounce(self, threats: List[RowSample]) -> bool:

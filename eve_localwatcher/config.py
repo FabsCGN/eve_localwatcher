@@ -80,6 +80,7 @@ class Config:
     # --- loop / alarm ----------------------------------------------------
     scan_interval_ms: int = 750
     alarm_sound_path: Optional[str] = None
+    alarm_volume: int = 100           # hostile-alarm volume, 0..100 (%)
     baseline_count: Optional[int] = None  # "safe" Local headcount from calibration
 
     # --- auto-learn (off by default — a sitting hostile could be learnt) -
@@ -89,11 +90,29 @@ class Config:
     # --- overlay popup positions (kind -> [x, y]); empty = auto-centred ---
     overlay_pos: dict = field(default_factory=dict)
 
-    # --- Haven / Dread-Watch (opt-in second detector) --------------------
+    # --- Haven / Last-Wave counter (opt-in second detector) --------------
     haven_enabled: bool = False
     haven_region: Region = field(default_factory=Region)   # the "N/M" counter
-    haven_expected_total: int = 6   # expected pocket count (validation/display)
-    haven_alarm_sound_path: Optional[str] = None            # second, distinct sound
+    haven_expected_total: int = 6   # expected pocket count (validation + last wave)
+    haven_alarm_sound_path: Optional[str] = None            # last-wave alarm sound
+    haven_volume: int = 100         # last-wave-alarm volume, 0..100 (%)
+
+    # --- last-wave spawn detectors (presence in a dedicated overview) -----
+    # Active only while the last wave is reached (counter at its final pocket).
+    # Detection is brightness-based: a populated overview row lights up pixels
+    # above the dark background; an empty overview stays dark.
+    spawn_brightness_thr: int = 70  # grey value above which a pixel counts as "lit"
+    spawn_min_bright_px: int = 12    # min lit pixels for the overview to be "populated"
+
+    dread_enabled: bool = False     # Dread/Titan overview spawn detector
+    dread_region: Region = field(default_factory=Region)
+    dread_sound_path: Optional[str] = None
+    dread_volume: int = 100
+
+    faction_enabled: bool = False   # Faction (Battleship) overview spawn detector
+    faction_region: Region = field(default_factory=Region)
+    faction_sound_path: Optional[str] = None
+    faction_volume: int = 100
 
     # --- Threat-check enrichment (opt-in, network) -----------------------
     enrichment_enabled: bool = False
@@ -106,6 +125,12 @@ class Config:
     # friendly entities derived from SSO (corp/alliance/fleet/blues), cached
     blue_corp_ids: List[int] = field(default_factory=list)
     blue_alliance_ids: List[int] = field(default_factory=list)
+
+    # --- Intel (threat-check) floating window ----------------------------
+    intel_pos: Optional[List[int]] = None   # [x, y] of the floating window
+    intel_alpha: int = 92                    # window opacity, 20..100 (%)
+    intel_topmost: bool = False              # keep above the game window
+    intel_click_through: bool = False        # mouse passes through (Windows only)
 
     # --- optional explicit Tesseract path --------------------------------
     tesseract_cmd: Optional[str] = None
@@ -131,6 +156,7 @@ class Config:
             "tag_min_value": self.tag_min_value,
             "scan_interval_ms": self.scan_interval_ms,
             "alarm_sound_path": self.alarm_sound_path,
+            "alarm_volume": self.alarm_volume,
             "baseline_count": self.baseline_count,
             "auto_learn_enabled": self.auto_learn_enabled,
             "auto_learn_seconds": self.auto_learn_seconds,
@@ -148,6 +174,21 @@ class Config:
             "haven_region": vars(self.haven_region),
             "haven_expected_total": self.haven_expected_total,
             "haven_alarm_sound_path": self.haven_alarm_sound_path,
+            "haven_volume": self.haven_volume,
+            "spawn_brightness_thr": self.spawn_brightness_thr,
+            "spawn_min_bright_px": self.spawn_min_bright_px,
+            "dread_enabled": self.dread_enabled,
+            "dread_region": vars(self.dread_region),
+            "dread_sound_path": self.dread_sound_path,
+            "dread_volume": self.dread_volume,
+            "faction_enabled": self.faction_enabled,
+            "faction_region": vars(self.faction_region),
+            "faction_sound_path": self.faction_sound_path,
+            "faction_volume": self.faction_volume,
+            "intel_pos": self.intel_pos,
+            "intel_alpha": self.intel_alpha,
+            "intel_topmost": self.intel_topmost,
+            "intel_click_through": self.intel_click_through,
             "tesseract_cmd": self.tesseract_cmd,
         }
 
@@ -173,6 +214,7 @@ class Config:
         c.tag_min_value = d.get("tag_min_value", c.tag_min_value)
         c.scan_interval_ms = d.get("scan_interval_ms", c.scan_interval_ms)
         c.alarm_sound_path = d.get("alarm_sound_path", c.alarm_sound_path)
+        c.alarm_volume = d.get("alarm_volume", c.alarm_volume)
         c.baseline_count = d.get("baseline_count", c.baseline_count)
         c.auto_learn_enabled = d.get("auto_learn_enabled", c.auto_learn_enabled)
         c.auto_learn_seconds = d.get("auto_learn_seconds", c.auto_learn_seconds)
@@ -191,6 +233,22 @@ class Config:
         c.haven_expected_total = d.get("haven_expected_total", c.haven_expected_total)
         c.haven_alarm_sound_path = d.get("haven_alarm_sound_path",
                                          c.haven_alarm_sound_path)
+        c.haven_volume = d.get("haven_volume", c.haven_volume)
+        c.spawn_brightness_thr = d.get("spawn_brightness_thr", c.spawn_brightness_thr)
+        c.spawn_min_bright_px = d.get("spawn_min_bright_px", c.spawn_min_bright_px)
+        c.dread_enabled = d.get("dread_enabled", c.dread_enabled)
+        c.dread_region = Region.from_obj(d.get("dread_region"))
+        c.dread_sound_path = d.get("dread_sound_path", c.dread_sound_path)
+        c.dread_volume = d.get("dread_volume", c.dread_volume)
+        c.faction_enabled = d.get("faction_enabled", c.faction_enabled)
+        c.faction_region = Region.from_obj(d.get("faction_region"))
+        c.faction_sound_path = d.get("faction_sound_path", c.faction_sound_path)
+        c.faction_volume = d.get("faction_volume", c.faction_volume)
+        intel_pos = d.get("intel_pos")
+        c.intel_pos = list(intel_pos) if intel_pos else None
+        c.intel_alpha = d.get("intel_alpha", c.intel_alpha)
+        c.intel_topmost = d.get("intel_topmost", c.intel_topmost)
+        c.intel_click_through = d.get("intel_click_through", c.intel_click_through)
         c.tesseract_cmd = d.get("tesseract_cmd", c.tesseract_cmd)
         return c
 

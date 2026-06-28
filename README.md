@@ -77,21 +77,27 @@ den nächsten Schritt an.
 Die ganze Einrichtung liegt in **Tabs** darunter:
 - **Erfassung** — EVE-Fenster, Capture-Bereiche, Zeilen-/Icon-Layout, Namens-OCR
 - **Erkennung** — Kalibrierung, Tag-Schwelle, Toleranz (mit Live-Vorschau)
-- **Alarm & Haven** — Hostile-Local-Alarm, Sounds, Popup-Platzierung, Dread-Watch
-- **Threat-Check** — SSO-Login, Zwischenablage-Check, Auto-Threat
+- **Alarm & Haven** — Hostile-Local-Alarm, Sounds + **Lautstärke je Alarm**,
+  Popup-Platzierung, „Letzte Welle"-Counter, Spawn-Detektoren
+- **Threat-Check** — SSO-Login, Zwischenablage-Check, Auto-Threat, Intel-Fenster
 - **Log** — Verlauf & Debug-Ausgabe
 
 **Jedes Feature ist einzeln zuschaltbar** — du musst nicht alles nutzen:
 - **Hostile-Local-Alarm** (Tab *Alarm & Haven*) — Header-Count + Farb-Sampling
-- **Haven Dread-Watch** (Tab *Alarm & Haven*) — Pocket-Counter `N/M`
+- **Letzte Welle** (Tab *Alarm & Haven*) — Pocket-Counter `N/M`; Alarm „letzte
+  Welle, danach neue Site anfliegen"
+- **Spawn-Detektoren** (Tab *Alarm & Haven*) — eigene Alarme für Dread/Titan- und
+  Faction-(Battleship-)Spawns; nur in der letzten Welle scharf
 - **Threat-Check** (Tab *Threat-Check*) — manuelle Bewertung per Zwischenablage
 - **Auto-Threat** (Tab *Threat-Check*) — liest bei einem Neut die Namen per OCR
   und startet den Threat-Check automatisch
 
-Der **Start**-Knopf treibt die Scan-Features (Local-Alarm / Haven / Auto-Threat);
-der manuelle Threat-Check läuft unabhängig über seinen eigenen Knopf. Sind nur
-einzelne Features aktiv, verlangt die App auch nur deren Einrichtung (z. B. „nur
-Haven" braucht keine Farb-Kalibrierung).
+Jeder Alarm hat einen **eigenen WAV-Sound und einen Lautstärke-Regler** (0–100 %).
+
+Der **Start**-Knopf treibt die Scan-Features (Local-Alarm / Letzte Welle /
+Spawn-Detektoren / Auto-Threat); der manuelle Threat-Check läuft unabhängig über
+seinen eigenen Knopf. Sind nur einzelne Features aktiv, verlangt die App auch nur
+deren Einrichtung (z. B. „nur Letzte Welle" braucht keine Farb-Kalibrierung).
 
 ## Erste Einrichtung
 
@@ -116,22 +122,43 @@ Haven" braucht keine Farb-Kalibrierung).
    als Friendly-Set gespeichert.
 6. **„▶ Start"**.
 
-## Haven / Dread-Watch (optional, zweiter Detektor)
+## Letzte Welle + Spawn-Detektoren (optional)
 
-Eine Haven hat 6 Pockets; in der letzten kann ein Dreadnought spawnen. Dieser
-opt-in Detektor liest den Pocket-Counter (`N/M`, z. B. `6/6`) und löst beim
-Erreichen der letzten Pocket einen **eigenen Alarm mit separatem Sound** und
-einem **Bernstein-Overlay** aus — als Erinnerung, auf einen Dread zu prüfen.
+Eine Haven hat mehrere Pockets; in der letzten Welle können Dreads/Titans oder
+Faction-Battleships spawnen. Dafür gibt es drei zusammenhängende, opt-in
+Detektoren — jeder mit **eigenem WAV-Sound, eigenem Lautstärke-Regler und
+eigenem, verschiebbarem Overlay**:
 
-- Frame **„Haven / Dread-Watch"**: aktivieren, **„Counter-Bereich festlegen"**
-  (Rechteck **nur um die Zahl** `N/M`, den grünen Balken weglassen), eigenen
-  **Dread-Sound** wählen.
-- **Trigger generisch bei N = M** — funktioniert auch bei abweichender
-  Pocket-Zahl. „Erwartete Pockets" (Default 6) dient nur Anzeige/Validierung.
+**1. „Letzte Welle" (Pocket-Counter).** Liest den Counter (`N/M`, z. B. `6/6`)
+und meldet beim Erreichen der letzten Pocket: *letzte Welle, danach neue Site
+anfliegen.*
+
+- Frame **„Letzte Welle"**: aktivieren, **„Counter-Bereich festlegen"** (Rechteck
+  **nur um die Zahl** `N/M`, den grünen Balken weglassen), Sound + Lautstärke.
+- **„Max. Pockets"** (Default 6) ist die Plausibilitätsgrenze: Lesungen mit
+  abweichender Gesamtzahl oder `N > M` (z. B. `9/6`) werden als OCR-Fehler
+  **verworfen** — typisch beim Kameraschwenk.
+- **Monotonie-Filter:** akzeptiert nur denselben Wert, `+1` oder einen Reset auf
+  `1` (neue Site). Vor-/Rücksprünge eines Schwenks (z. B. `3 → 6 → 4`) werden
+  gefiltert. So gibt es keine Fehlalarme durch verrutschte OCR-Werte.
 - Feuert **einmal** beim Erreichen der letzten Pocket; sinkt der Zähler wieder
-  (neue Haven ab `1/6`), wird der Alarm neu scharf.
-- Läuft im selben Scan-Loop wie der Hostile-Scan; Hostile- und Dread-Alarm
-  können gleichzeitig erscheinen (gestapelte Overlays).
+  oder verschwindet (neue Site), wird der Alarm neu scharf.
+
+**2. + 3. Spawn-Detektoren (Dread/Titan, Faction-Battleship).** Erzeuge in EVE
+**zwei eigene Overview-Fenster**, eines gefiltert auf Dreads/Titans, eines auf
+die Faction-Battleships. Jeder Detektor beobachtet sein Overview-Rechteck und
+schlägt Alarm, **sobald dort etwas erscheint** (Helligkeits-Erkennung: leer =
+dunkel, Spawn = helle Zeile). Feuert einmal pro Spawn, re-armt wenn das Overview
+wieder leer ist.
+
+- Frame **„Spawn-Detektoren"**: je Block aktivieren, **„Overview-Bereich
+  festlegen"** (nur den Zeilenbereich, ohne Spaltenköpfe), Sound + Lautstärke.
+- **Nur in der letzten Welle scharf:** die Spawn-Detektoren werten erst, wenn der
+  Pocket-Counter die letzte Pocket erreicht hat. Sie **brauchen** also den
+  aktiven „Letzte Welle"-Counter.
+
+Alle laufen im selben Scan-Loop wie der Hostile-Scan; mehrere Alarme können
+gleichzeitig erscheinen (gestapelte Overlays).
 
 ## Konfiguration
 
@@ -147,7 +174,11 @@ Wird automatisch unter `%USERPROFILE%\.eve_localwatcher\config.json` gespeichert
 | `color_tolerance` | HSV-Feature-Distanz (Default 18). Zu eng → Fehlalarme |
 | `tag_min_value` | Helligkeitsschwelle (Default 70). Slot dunkler als das ⇒ „leer", kein Alarm. Trennt echte Icons vom dunklen Hintergrund |
 | `scan_interval_ms` | Loop-Intervall (Default 750) |
-| `alarm_sound_path` | optionaler WAV; sonst System-Beep |
+| `alarm_sound_path`, `alarm_volume` | optionaler WAV + Lautstärke 0–100 (Hostile) |
+| `haven_*`, `dread_*`, `faction_*` | Region/Sound/Lautstärke je Detektor (Letzte Welle, Dread/Titan, Faction) |
+| `haven_expected_total` | Max. Pockets (Default 6) — Plausibilitätsgrenze gegen OCR-Fehler |
+| `spawn_brightness_thr`, `spawn_min_bright_px` | Schwellen der Spawn-Präsenzerkennung (heller Pixel-Anteil) |
+| `intel_*` | Intel-Fenster: Position, Transparenz, Immer-oben, Klick-durch |
 | `auto_learn_enabled` | **Default aus** — ein still sitzender Hostile würde sonst als safe gelernt |
 
 ## Alarm-Popups platzieren
@@ -156,10 +187,25 @@ Die Capture erfolgt über **Bildschirm-Pixel** — liegt ein Alarm-Popup über
 einem Capture-Bereich, liest der nächste Scan das Popup und löst erneut Alarm
 aus (Rückkopplung). Deshalb beide Popups **weg von den Bereichen** legen:
 
-- „Hostile-Popup platzieren" (Frame *Alarm & Loop*) bzw. „Dread-Popup
-  platzieren" (Frame *Haven*) klicken → das Popup erscheint → **ziehen** →
-  **Doppelklick speichert** die Position (pro Monitor, übersteht Neustart).
-- Ohne gespeicherte Position erscheinen die Popups oben-zentriert.
+- „Hostile-Popup platzieren" (Frame *Alarm & Loop*) bzw. „Popup platzieren" in
+  den Frames *Letzte Welle* und *Spawn-Detektoren* klicken → das Popup erscheint →
+  **ziehen** → **Doppelklick speichert** die Position (pro Monitor, übersteht
+  Neustart).
+- Ohne gespeicherte Position erscheinen die Popups oben-zentriert (vier Alarm-
+  arten gestapelt: Hostile, Letzte Welle, Dread/Titan, Faction).
+
+## Intel-Fenster (Threat-Check als Overlay)
+
+Das Threat-Check-Ergebnisfenster lässt sich als **Overlay über dem Spiel**
+nutzen (Frame *Intel-Fenster* im Tab *Threat-Check*):
+
+- **Immer oben** — hält das Fenster über dem EVE-Client.
+- **Transparenz** — Regler 20–100 %.
+- **Klick-durch** — Mausklicks gehen durch das Fenster ins Spiel. Achtung: dann
+  sind die zKill-Links nicht klickbar; zum Bedienen/Verschieben wieder ausschalten.
+- **Verschieben** — an der Kopfzeile ziehen; die Position bleibt gespeichert.
+- Bei einem neuen Intel-Scan wird der **Inhalt zurückgesetzt**, das Fenster bleibt
+  aber offen an seiner Position.
 
 ## Bekannte Fallstricke (im Tool behandelt)
 
@@ -187,7 +233,7 @@ eve_localwatcher/
   capture.py       # mss-Screen-Capture
   color.py         # HSV-Feature-Distanz + Friendly-Test
   ocr.py           # Header-Count via Tesseract (graceful fallback)
-  alarm.py         # akustischer Alarm (winsound)
+  alarm.py         # akustischer Alarm mit Lautstärke (WAV-Sample-Skalierung + winsound)
   region_select.py # Vollbild-Rechteck-Auswahl
   winutil.py       # DPI, Fenstersuche, Virtual-Screen
   config.py        # Config-Modell + JSON-Persistenz

@@ -78,20 +78,40 @@ TIPS = {
                 "Anstieg Alarm auslöst).",
     "debug": "Einmal-Snapshot: loggt Header-Count und pro Zeile Farbe, Status "
              "(friendly/threat/leer) und Messwerte — zum Justieren der Regler.",
-    "haven_on": "Zweiter Detektor: liest den Haven-Pocket-Counter (z. B. 6/6). "
-                "Erreicht N die Gesamtzahl M, kommt ein eigener Dread-Check-"
-                "Alarm. Unabhängig vom Hostile-Scan.",
+    "haven_on": "Liest den Pocket-Counter (z. B. 6/6). Erreicht N die Gesamtzahl "
+                "M, kommt der 'Letzte Welle'-Alarm — danach neue Site anfliegen. "
+                "Dieser Counter schaltet zugleich die Spawn-Detektoren scharf.",
     "haven_region": "Rechteck NUR um die Zahl 'N/M' ziehen — den grünen Balken "
                     "weglassen, er stört das OCR.",
-    "haven_total": "Erwartete Pocket-Zahl (Default 6) — dient der Validierung "
-                   "und Anzeige. Ausgelöst wird generisch bei N = M.",
-    "haven_sound": "Eigener WAV-Sound für den Dread-Check, getrennt vom Hostile-"
-                   "Alarm. Leer = System-Beep.",
+    "haven_total": "Maximale Pocket-Zahl (Default 6). Werte mit anderer Gesamtzahl "
+                   "oder N größer als M (z. B. 9/6) werden als OCR-Fehler verworfen. "
+                   "Ausgelöst wird bei N = M.",
+    "haven_sound": "Eigener WAV-Sound für den 'Letzte Welle'-Alarm, getrennt vom "
+                   "Hostile-Alarm. Leer = System-Beep.",
+    "volume": "Lautstärke dieses Alarms (0–100 %). Gilt nur für eigene WAV-Dateien; "
+              "der Fallback-Beep ignoriert sie.",
+    "dread_on": "Spawn-Detektor für ein Overview-Fenster, das NUR Dreads/Titans "
+                "zeigt. Feuert, sobald dort in der letzten Welle etwas erscheint. "
+                "Braucht den aktiven Pocket-Counter (wird nur in letzter Welle scharf).",
+    "dread_region": "Rechteck über den Zeilenbereich des Dread/Titan-Overviews "
+                    "ziehen (ohne Spaltenköpfe). Leer = dunkel, ein Spawn macht ihn hell.",
+    "dread_sound": "Eigener WAV-Sound für den Dread/Titan-Spawn. Leer = System-Beep.",
+    "faction_on": "Spawn-Detektor für ein Overview-Fenster, das NUR Faction-Haven-"
+                  "Spawns (Battleships) zeigt. Feuert in der letzten Welle bei einem "
+                  "Spawn. Braucht den aktiven Pocket-Counter.",
+    "faction_region": "Rechteck über den Zeilenbereich des Faction-Overviews ziehen "
+                      "(ohne Spaltenköpfe).",
+    "faction_sound": "Eigener WAV-Sound für den Faction-Spawn. Leer = System-Beep.",
+    "intel_top": "Intel-Fenster immer über dem Spielfenster halten.",
+    "intel_alpha": "Transparenz des Intel-Fensters (20–100 %).",
+    "intel_click": "Klick-durch: Mausklicks gehen durch das Intel-Fenster hindurch "
+                   "ins Spiel. ACHTUNG: dann sind die zKill-Links nicht klickbar — "
+                   "zum Bedienen/Verschieben wieder ausschalten.",
     "place_hostile": "Hostile-Popup verschieben: erscheint zum Ziehen, Doppel-"
                      "klick speichert. WICHTIG: weg von den Capture-Bereichen "
                      "legen, sonst liest der Scanner das Popup und löst erneut "
                      "Alarm aus.",
-    "place_haven": "Dread-Popup verschieben: ziehen, Doppelklick speichert. "
+    "place_haven": "'Letzte Welle'-Popup verschieben: ziehen, Doppelklick speichert. "
                    "Ebenfalls außerhalb der Capture-Bereiche platzieren.",
     "enrich": "Threat-Check aktivieren (Netzwerk): nicht-blaue Piloten werden via "
               "ESI + zKillboard bewertet. Friendlies (Corp/Allianz/Fleet) werden "
@@ -136,8 +156,8 @@ class App:
 
         self.root = tk.Tk()
         self.root.title("Mister Lee's magischer Intelligentheit-Helfer")
-        self.root.geometry("500x600")
-        self.root.minsize(480, 540)
+        # Final size is computed from the content in _fit_to_content() once the UI
+        # is built, so the tallest tab is fully visible without manual resizing.
 
         self._events: "queue.Queue[tuple]" = queue.Queue()
         self._overlays: dict = {}   # kind -> {win, detail, after}
@@ -161,9 +181,24 @@ class App:
         self._on_tol_change()
         self._refresh_sso_status()
         self._refresh_ocr_warning()
+        self._fit_to_content()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(120, self._poll_queue)
         self.root.after(1000, self._clip_poll)
+
+    def _fit_to_content(self) -> None:
+        """Open the window large enough that the tallest tab is fully visible.
+
+        ttk.Notebook requests the size of its largest pane, so the window's
+        requested height already covers every tab — we just adopt it (capped to
+        the screen) instead of a fixed guess that cut off the longer tabs.
+        """
+        self.root.update_idletasks()
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        w = min(self.root.winfo_reqwidth() + 16, sw - 40)
+        h = min(self.root.winfo_reqheight() + 16, sh - 80)
+        self.root.geometry(f"{int(w)}x{int(h)}")
+        self.root.minsize(min(480, int(w)), min(540, int(h)))
 
     # ------------------------------------------------------------------- vars
     def _build_vars(self) -> None:
@@ -183,14 +218,27 @@ class App:
         self.v_row_y = tk.IntVar(value=c.first_row_y_offset)
         self.v_maxrows = tk.IntVar(value=c.max_visible_rows)
         self.v_sound = tk.StringVar(value=c.alarm_sound_path or "")
+        self.v_alarm_vol = tk.DoubleVar(value=c.alarm_volume)
         self.v_autolearn = tk.BooleanVar(value=c.auto_learn_enabled)
         self.v_autosecs = tk.IntVar(value=c.auto_learn_seconds)
         self.v_haven_on = tk.BooleanVar(value=c.haven_enabled)
         self.v_haven_total = tk.IntVar(value=c.haven_expected_total)
         self.v_haven_sound = tk.StringVar(value=c.haven_alarm_sound_path or "")
+        self.v_haven_vol = tk.DoubleVar(value=c.haven_volume)
+        # last-wave spawn detectors
+        self.v_dread_on = tk.BooleanVar(value=c.dread_enabled)
+        self.v_dread_sound = tk.StringVar(value=c.dread_sound_path or "")
+        self.v_dread_vol = tk.DoubleVar(value=c.dread_volume)
+        self.v_faction_on = tk.BooleanVar(value=c.faction_enabled)
+        self.v_faction_sound = tk.StringVar(value=c.faction_sound_path or "")
+        self.v_faction_vol = tk.DoubleVar(value=c.faction_volume)
         self.v_enrich = tk.BooleanVar(value=c.enrichment_enabled)
         self.v_zkill_contact = tk.StringVar(value=c.zkill_contact)
         self.v_clipwatch = tk.BooleanVar(value=False)
+        # intel floating window
+        self.v_intel_top = tk.BooleanVar(value=c.intel_topmost)
+        self.v_intel_alpha = tk.DoubleVar(value=c.intel_alpha)
+        self.v_intel_click = tk.BooleanVar(value=c.intel_click_through)
 
     # -------------------------------------------------------------------- UI
     def _build_ui(self) -> None:
@@ -350,6 +398,7 @@ class App:
         # --- alarm / loop ---
         f5 = ttk.LabelFrame(tab_alarm, text="Alarm & Loop")
         f5.pack(fill="x", **pad)
+        f5.columnconfigure(1, weight=1)
         lbl_iv = ttk.Label(f5, text="Intervall (ms)")
         lbl_iv.grid(row=0, column=0, sticky="w", padx=6, pady=3)
         sb_iv = ttk.Spinbox(f5, from_=200, to=5000, increment=50,
@@ -377,9 +426,10 @@ class App:
                                  command=lambda: self._place_overlay("hostile"))
         btn_place_h.grid(row=3, column=0, columnspan=2, sticky="w", padx=6, pady=3)
         tip(btn_place_h, TIPS["place_hostile"])
+        self._vol_slider(f5, 4, self.v_alarm_vol)
 
-        # --- haven / dread-watch ---
-        f7 = ttk.LabelFrame(tab_alarm, text="Haven / Dread-Watch (Pocket-Counter)")
+        # --- last wave (pocket counter) ---
+        f7 = ttk.LabelFrame(tab_alarm, text="Letzte Welle (Pocket-Counter)")
         f7.pack(fill="x", **pad)
         f7.columnconfigure(1, weight=1)
         chk_hv = ttk.Checkbutton(f7, text="aktiviert", variable=self.v_haven_on,
@@ -390,29 +440,51 @@ class App:
                                command=self._set_haven_region)
         btn_hvreg.grid(row=0, column=1, columnspan=2, sticky="ew", padx=6)
         tip(btn_hvreg, TIPS["haven_region"])
-        lbl_hvt = ttk.Label(f7, text="Erwartete Pockets")
+        lbl_hvt = ttk.Label(f7, text="Max. Pockets")
         lbl_hvt.grid(row=1, column=0, sticky="w", padx=6, pady=3)
         sb_hvt = ttk.Spinbox(f7, from_=2, to=20, textvariable=self.v_haven_total, width=6)
         sb_hvt.grid(row=1, column=1, sticky="w")
         tip(lbl_hvt, TIPS["haven_total"])
         tip(sb_hvt, TIPS["haven_total"])
-        lbl_hvs = ttk.Label(f7, text="Dread-Sound:")
+        lbl_hvs = ttk.Label(f7, text="Sound:")
         lbl_hvs.grid(row=2, column=0, sticky="w", padx=6)
         ent_hvs = ttk.Entry(f7, textvariable=self.v_haven_sound, width=24)
         ent_hvs.grid(row=2, column=1, sticky="w")
         ttk.Button(f7, text="…", width=3, command=self._pick_haven_sound)\
             .grid(row=2, column=2, padx=4)
-        ttk.Button(f7, text="Dread-Alarm testen",
+        ttk.Button(f7, text="'Letzte Welle'-Alarm testen",
                    command=self._fire_test_haven).grid(row=3, column=1, sticky="w",
                                                        padx=6, pady=3)
-        btn_place_hv = ttk.Button(f7, text="Dread-Popup platzieren",
+        btn_place_hv = ttk.Button(f7, text="Popup platzieren",
                                   command=lambda: self._place_overlay("haven"))
         btn_place_hv.grid(row=3, column=0, sticky="w", padx=6, pady=3)
         tip(btn_place_hv, TIPS["place_haven"])
         tip(lbl_hvs, TIPS["haven_sound"])
         tip(ent_hvs, TIPS["haven_sound"])
+        self._vol_slider(f7, 4, self.v_haven_vol)
         self.lbl_haven = ttk.Label(f7, text="", foreground="#888")
-        self.lbl_haven.grid(row=4, column=0, columnspan=3, sticky="w", padx=6)
+        self.lbl_haven.grid(row=5, column=0, columnspan=3, sticky="w", padx=6)
+
+        # --- last-wave spawn detectors (Dread/Titan + Faction) ---
+        f9 = ttk.LabelFrame(tab_alarm,
+                            text="Spawn-Detektoren (nur in letzter Welle)")
+        f9.pack(fill="x", **pad)
+        f9.columnconfigure(1, weight=1)
+        self._build_spawn_block(
+            f9, 0, "Dread / Titan", self.v_dread_on, self.v_dread_sound,
+            self.v_dread_vol, self._set_dread_region, self._pick_dread_sound,
+            self._fire_test_dread, lambda: self._place_overlay("dread"),
+            "dread_on", "dread_region", "dread_sound")
+        ttk.Separator(f9, orient="horizontal").grid(
+            row=5, column=0, columnspan=3, sticky="ew", padx=6, pady=6)
+        self._build_spawn_block(
+            f9, 6, "Faction (Battleship)", self.v_faction_on, self.v_faction_sound,
+            self.v_faction_vol, self._set_faction_region, self._pick_faction_sound,
+            self._fire_test_faction, lambda: self._place_overlay("faction"),
+            "faction_on", "faction_region", "faction_sound")
+        self.lbl_spawn = ttk.Label(f9, text="", foreground="#888")
+        self.lbl_spawn.grid(row=11, column=0, columnspan=3, sticky="w", padx=6,
+                            pady=(4, 0))
 
         # --- threat-check ---
         f8 = ttk.LabelFrame(tab_threat, text="Threat-Check (ESI + zKillboard)")
@@ -449,6 +521,27 @@ class App:
                        "prüfen. Friendlies (Corp/Allianz/Fleet) werden vorher "
                        "rausgefiltert.").pack(fill="x", padx=14, pady=(2, 0))
 
+        # --- intel floating window options ---
+        f10 = ttk.LabelFrame(tab_threat, text="Intel-Fenster (Overlay)")
+        f10.pack(fill="x", **pad)
+        f10.columnconfigure(1, weight=1)
+        chk_it = ttk.Checkbutton(f10, text="Immer oben", variable=self.v_intel_top,
+                                 command=self._on_intel_opt_change)
+        chk_it.grid(row=0, column=0, sticky="w", padx=6, pady=3)
+        tip(chk_it, TIPS["intel_top"])
+        chk_ic = ttk.Checkbutton(f10, text="Klick-durch", variable=self.v_intel_click,
+                                 command=self._on_intel_opt_change)
+        chk_ic.grid(row=0, column=1, sticky="w", padx=6)
+        tip(chk_ic, TIPS["intel_click"])
+        lbl_ia = ttk.Label(f10, text="Transparenz")
+        lbl_ia.grid(row=1, column=0, sticky="w", padx=6)
+        sc_ia = ttk.Scale(f10, from_=20, to=100, orient="horizontal",
+                          variable=self.v_intel_alpha,
+                          command=lambda _e: self._on_intel_opt_change())
+        sc_ia.grid(row=1, column=1, sticky="ew", padx=6)
+        tip(lbl_ia, TIPS["intel_alpha"])
+        tip(sc_ia, TIPS["intel_alpha"])
+
         # --- log (own tab) ---
         self.log = tk.Text(tab_log, height=9, state="disabled", wrap="word",
                            font=("Consolas", 9), relief="flat")
@@ -462,6 +555,49 @@ class App:
         if tip_key:
             tip(lbl, TIPS[tip_key])
             tip(sb, TIPS[tip_key])
+
+    def _vol_slider(self, parent, row, var, label="Lautstärke") -> None:
+        """A 0–100 % volume slider with a live percentage readout."""
+        lbl = ttk.Label(parent, text=label)
+        lbl.grid(row=row, column=0, sticky="w", padx=6, pady=2)
+        sc = ttk.Scale(parent, from_=0, to=100, orient="horizontal", variable=var)
+        sc.grid(row=row, column=1, sticky="ew", padx=6)
+        out = ttk.Label(parent, width=5)
+        out.grid(row=row, column=2, sticky="w")
+        tip(lbl, TIPS["volume"])
+        tip(sc, TIPS["volume"])
+
+        def _upd(*_):
+            out.config(text=f"{int(float(var.get()))} %")
+        var.trace_add("write", _upd)
+        _upd()
+
+    def _build_spawn_block(self, parent, base, title, v_on, v_sound, v_vol,
+                           set_region, pick_sound, fire_test, place_popup,
+                           tip_on, tip_region, tip_sound) -> None:
+        """One Dread/Faction spawn-detector block, anchored at grid row ``base``
+        (uses rows base..base+3)."""
+        chk = ttk.Checkbutton(parent, text=title, variable=v_on,
+                              command=self._update_ready)
+        chk.grid(row=base, column=0, sticky="w", padx=6, pady=3)
+        tip(chk, TIPS[tip_on])
+        btn_reg = ttk.Button(parent, text="Overview-Bereich festlegen",
+                             command=set_region)
+        btn_reg.grid(row=base, column=1, columnspan=2, sticky="ew", padx=6)
+        tip(btn_reg, TIPS[tip_region])
+        lbl_s = ttk.Label(parent, text="Sound:")
+        lbl_s.grid(row=base + 1, column=0, sticky="w", padx=6)
+        ent_s = ttk.Entry(parent, textvariable=v_sound, width=24)
+        ent_s.grid(row=base + 1, column=1, sticky="w")
+        ttk.Button(parent, text="…", width=3, command=pick_sound)\
+            .grid(row=base + 1, column=2, padx=4)
+        tip(lbl_s, TIPS[tip_sound])
+        tip(ent_s, TIPS[tip_sound])
+        ttk.Button(parent, text="Popup platzieren", command=place_popup)\
+            .grid(row=base + 2, column=0, sticky="w", padx=6, pady=3)
+        ttk.Button(parent, text="Alarm testen", command=fire_test)\
+            .grid(row=base + 2, column=1, sticky="w", padx=6, pady=3)
+        self._vol_slider(parent, base + 3, v_vol)
 
     # ----------------------------------------------------------- previews
     def _on_tol_change(self, _evt=None) -> None:
@@ -551,13 +687,24 @@ class App:
         c.first_row_y_offset = int(self.v_row_y.get())
         c.max_visible_rows = int(self.v_maxrows.get())
         c.alarm_sound_path = self.v_sound.get().strip() or None
+        c.alarm_volume = int(self.v_alarm_vol.get())
         c.auto_learn_enabled = bool(self.v_autolearn.get())
         c.auto_learn_seconds = int(self.v_autosecs.get())
         c.haven_enabled = bool(self.v_haven_on.get())
         c.haven_expected_total = int(self.v_haven_total.get())
         c.haven_alarm_sound_path = self.v_haven_sound.get().strip() or None
+        c.haven_volume = int(self.v_haven_vol.get())
+        c.dread_enabled = bool(self.v_dread_on.get())
+        c.dread_sound_path = self.v_dread_sound.get().strip() or None
+        c.dread_volume = int(self.v_dread_vol.get())
+        c.faction_enabled = bool(self.v_faction_on.get())
+        c.faction_sound_path = self.v_faction_sound.get().strip() or None
+        c.faction_volume = int(self.v_faction_vol.get())
         c.enrichment_enabled = bool(self.v_enrich.get())
         c.zkill_contact = self.v_zkill_contact.get().strip()
+        c.intel_topmost = bool(self.v_intel_top.get())
+        c.intel_alpha = int(self.v_intel_alpha.get())
+        c.intel_click_through = bool(self.v_intel_click.get())
         c.save()
 
     # ----------------------------------------------------------- window pick
@@ -621,7 +768,25 @@ class App:
         if rect is None:
             return
         self._store_region("haven_region", rect)
-        self._log(f"Haven-Counter gesetzt: {rect}")
+        self._log(f"Pocket-Counter gesetzt: {rect}")
+
+    def _set_dread_region(self) -> None:
+        self._apply_settings_to_cfg()
+        rect = select_region(
+            self.root, "Dread/Titan-Overview aufziehen — nur den Zeilenbereich")
+        if rect is None:
+            return
+        self._store_region("dread_region", rect)
+        self._log(f"Dread/Titan-Overview gesetzt: {rect}")
+
+    def _set_faction_region(self) -> None:
+        self._apply_settings_to_cfg()
+        rect = select_region(
+            self.root, "Faction-Overview aufziehen — nur den Zeilenbereich")
+        if rect is None:
+            return
+        self._store_region("faction_region", rect)
+        self._log(f"Faction-Overview gesetzt: {rect}")
 
     def _store_region(self, attr: str, rect_abs) -> None:
         x, y, w, h = rect_abs
@@ -789,7 +954,15 @@ class App:
                 return ("Im Tab 'Erkennung' kalibrieren: 'Aktuelles Local als "
                         "sicher merken'.")
         if c.haven_enabled and not c.haven_region.is_valid():
-            return "Haven-Counter-Bereich im Tab 'Alarm & Haven' festlegen."
+            return "Pocket-Counter-Bereich im Tab 'Alarm & Haven' festlegen."
+        # Spawn detectors only arm in the last wave → need the pocket counter.
+        if (c.dread_enabled or c.faction_enabled) and not c.haven_enabled:
+            return ("Spawn-Detektoren brauchen den Pocket-Counter — "
+                    "'Letzte Welle' aktivieren und Bereich festlegen.")
+        if c.dread_enabled and not c.dread_region.is_valid():
+            return "Dread/Titan-Overview-Bereich festlegen ('Alarm & Haven')."
+        if c.faction_enabled and not c.faction_region.is_valid():
+            return "Faction-Overview-Bereich festlegen ('Alarm & Haven')."
         return None
 
     def _update_ready(self) -> None:
@@ -837,15 +1010,39 @@ class App:
 
     def _pick_haven_sound(self) -> None:
         path = filedialog.askopenfilename(
-            title="Dread-Check-Sound (WAV)",
+            title="'Letzte Welle'-Sound (WAV)",
             filetypes=[("WAV", "*.wav"), ("Alle", "*.*")])
         if path:
             self.v_haven_sound.set(path)
 
+    def _pick_dread_sound(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Dread/Titan-Spawn-Sound (WAV)",
+            filetypes=[("WAV", "*.wav"), ("Alle", "*.*")])
+        if path:
+            self.v_dread_sound.set(path)
+
+    def _pick_faction_sound(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Faction-Spawn-Sound (WAV)",
+            filetypes=[("WAV", "*.wav"), ("Alle", "*.*")])
+        if path:
+            self.v_faction_sound.set(path)
+
     def _fire_test_haven(self) -> None:
         self._apply_settings_to_cfg()
-        alarm.play(self.cfg.haven_alarm_sound_path)
-        self._show_overlay("haven", "Test — Pocket 6/6, auf Dread prüfen!")
+        alarm.play(self.cfg.haven_alarm_sound_path, self.cfg.haven_volume / 100)
+        self._show_overlay("haven", "Test — letzte Welle, danach neue Site!")
+
+    def _fire_test_dread(self) -> None:
+        self._apply_settings_to_cfg()
+        alarm.play(self.cfg.dread_sound_path, self.cfg.dread_volume / 100)
+        self._show_overlay("dread", "Test — Dread/Titan-Spawn!")
+
+    def _fire_test_faction(self) -> None:
+        self._apply_settings_to_cfg()
+        alarm.play(self.cfg.faction_sound_path, self.cfg.faction_volume / 100)
+        self._show_overlay("faction", "Test — Faction-Spawn!")
 
     # ----------------------------------------------------------- threat-check
     def _refresh_ocr_warning(self) -> None:
@@ -942,12 +1139,21 @@ class App:
         if getattr(self, "_threat_win", None) is None or not self._threat_win.winfo_exists():
             win = tk.Toplevel(self.root)
             win.title("Threat-Check")
-            win.geometry("560x520")
+            sh = win.winfo_screenheight()
+            geo = f"600x{min(760, sh - 80)}"   # tall by default; fitted after render
+            pos = self.cfg.intel_pos
+            if pos and len(pos) == 2:
+                geo += f"+{int(pos[0])}+{int(pos[1])}"
+            win.geometry(geo)
             self._threat_win = win
             self._threat_head = tk.Label(win, text="", anchor="w", fg="white",
                                          bg="#444", font=("Segoe UI", 13, "bold"),
                                          padx=12, pady=10)
             self._threat_head.pack(fill="x")
+            # drag the window by its header; persist the position on release
+            self._threat_head.bind("<ButtonPress-1>", self._intel_drag_start)
+            self._threat_head.bind("<B1-Motion>", self._intel_drag_move)
+            self._threat_head.bind("<ButtonRelease-1>", self._intel_drag_end)
             # scrollable rows area
             outer = tk.Frame(win)
             outer.pack(fill="both", expand=True)
@@ -961,12 +1167,54 @@ class App:
             self._threat_canvas.configure(yscrollcommand=sb.set)
             self._threat_canvas.pack(side="left", fill="both", expand=True)
             sb.pack(side="right", fill="y")
+            self.root.after(50, self._apply_intel_window_opts)
         else:
             self._threat_win.deiconify()
             self._threat_win.lift()
+            self._apply_intel_window_opts()
         for w in self._threat_rows.winfo_children():
             w.destroy()
         self._threat_head.config(text=f"Prüfe {n_total} Piloten …", bg="#444")
+
+    # ---- intel floating-window options ----
+    def _apply_intel_window_opts(self) -> None:
+        """Apply topmost / opacity / click-through to the open intel window."""
+        win = getattr(self, "_threat_win", None)
+        if not win or not win.winfo_exists():
+            return
+        try:
+            win.attributes("-topmost", bool(self.v_intel_top.get()))
+            win.attributes("-alpha", max(20, int(self.v_intel_alpha.get())) / 100.0)
+        except tk.TclError:
+            pass
+        hwnd = winutil.tk_hwnd(win)
+        if hwnd:
+            winutil.set_click_through(hwnd, bool(self.v_intel_click.get()))
+
+    def _on_intel_opt_change(self, *_args) -> None:
+        self.cfg.intel_topmost = bool(self.v_intel_top.get())
+        self.cfg.intel_alpha = int(self.v_intel_alpha.get())
+        self.cfg.intel_click_through = bool(self.v_intel_click.get())
+        self.cfg.save()
+        self._apply_intel_window_opts()
+
+    def _intel_drag_start(self, e) -> None:
+        win = self._threat_win
+        self._intel_drag = {"ox": win.winfo_x(), "oy": win.winfo_y(),
+                            "px": e.x_root, "py": e.y_root}
+
+    def _intel_drag_move(self, e) -> None:
+        d = getattr(self, "_intel_drag", None)
+        if not d:
+            return
+        self._threat_win.geometry(
+            f"+{d['ox'] + (e.x_root - d['px'])}+{d['oy'] + (e.y_root - d['py'])}")
+
+    def _intel_drag_end(self, _e) -> None:
+        win = getattr(self, "_threat_win", None)
+        if win and win.winfo_exists():
+            self.cfg.intel_pos = [win.winfo_x(), win.winfo_y()]
+            self.cfg.save()
 
     def _render_threat_row(self, p) -> None:
         row = tk.Frame(self._threat_rows, bd=0)
@@ -1080,7 +1328,26 @@ class App:
             head += "  ⚠ kein SSO — Friendlies NICHT gefiltert"
             bg = "#b8860b"
         self._threat_head.config(text=head, bg=bg)
+        self._fit_intel_to_content()
         self._log(f"Threat-Check: {head}")
+
+    def _fit_intel_to_content(self) -> None:
+        """Grow the intel window to show all rows without scrolling, capped to
+        the screen. The top-left position is preserved (and nudged up only if the
+        window would run off the bottom edge)."""
+        win = getattr(self, "_threat_win", None)
+        if not win or not win.winfo_exists():
+            return
+        win.update_idletasks()
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        need_h = self._threat_head.winfo_reqheight() + \
+            self._threat_rows.winfo_reqheight() + 24
+        h = min(need_h, sh - 80)
+        w = min(max(600, self._threat_rows.winfo_reqwidth() + 24), sw - 40)
+        x, y = win.winfo_x(), win.winfo_y()
+        if y + h > sh - 20:                 # keep it on-screen vertically
+            y = max(0, sh - h - 60)
+        win.geometry(f"{int(w)}x{int(h)}+{int(x)}+{int(y)}")
 
     # --------------------------------------------------------------- queue pump
     def _poll_queue(self) -> None:
@@ -1146,7 +1413,7 @@ class App:
             if r.new_threat:
                 reasons.append(f"{len(r.threats)} Nicht-Friendly")
             reason = " · ".join(reasons) or "Alarm"
-            alarm.play(self.cfg.alarm_sound_path)
+            alarm.play(self.cfg.alarm_sound_path, self.cfg.alarm_volume / 100)
             self._show_overlay("hostile", reason)
             self._log(f"🚨 HOSTILE — {reason}  | region={r.cap_region} "
                       f"count={r.count} rows={len(r.rows)}")
@@ -1160,19 +1427,31 @@ class App:
             self._log(f"Auto-Threat: {len(r.threat_names)} Name(n) per OCR gelesen.")
             self._run_threat_check(r.threat_names)
 
-        # Dread-check alarm (amber overlay + second sound).
+        # Last-wave alarm (amber overlay + own sound).
         if r.haven_reached:
-            detail = f"Pocket {r.haven_stage}/{r.haven_total} — auf Dread prüfen!"
-            alarm.play(self.cfg.haven_alarm_sound_path)
+            detail = f"Pocket {r.haven_stage}/{r.haven_total} — danach neue Site!"
+            alarm.play(self.cfg.haven_alarm_sound_path, self.cfg.haven_volume / 100)
             self._show_overlay("haven", detail)
-            self._log(f"🐉 DREAD-CHECK — {detail}")
+            self._log(f"🏁 LETZTE WELLE — {detail}")
+
+        # Last-wave spawn detectors (each its own overlay + sound).
+        if r.dread_spawn:
+            alarm.play(self.cfg.dread_sound_path, self.cfg.dread_volume / 100)
+            self._show_overlay("dread", "Dread/Titan im Overview!")
+            self._log("🐉 DREAD/TITAN-SPAWN")
+        if r.faction_spawn:
+            alarm.play(self.cfg.faction_sound_path, self.cfg.faction_volume / 100)
+            self._show_overlay("faction", "Faction-Spawn im Overview!")
+            self._log("🩸 FACTION-SPAWN")
 
     # --------------------------------------------------------------- overlay
     # Each alarm kind has its own popup so a hostile and a dread-check alarm can
     # show at the same time (stacked vertically).
     _OVERLAY_STYLE = {
         "hostile": ("⚠  HOSTILE IN LOCAL", "#b30000", "#ffdddd", 40),
-        "haven":   ("⚠  DREAD-CHECK", "#b3720a", "#fff0d6", 160),
+        "haven":   ("🏁  LETZTE WELLE", "#b3720a", "#fff0d6", 160),
+        "dread":   ("🐉  DREAD / TITAN", "#6a1b9a", "#f0dcff", 280),
+        "faction": ("🩸  FACTION-SPAWN", "#9a1b3a", "#ffd8e0", 400),
     }
 
     _OVERLAY_W, _OVERLAY_H = 460, 110
@@ -1257,7 +1536,8 @@ class App:
         self._bind_recursive(win, "<Double-Button-1>", save)
 
     def _fire_test_alarm(self) -> None:
-        alarm.play(self.cfg.alarm_sound_path)
+        self._apply_settings_to_cfg()
+        alarm.play(self.cfg.alarm_sound_path, self.cfg.alarm_volume / 100)
         self._show_overlay("hostile", "Test-Alarm")
 
     # --------------------------------------------------------------- displays
@@ -1291,6 +1571,13 @@ class App:
             self.lbl_haven.config(
                 text=("aktiv · " if self.cfg.haven_enabled else "aus · ")
                      + f"Bereich: {hv.as_tuple() if hv.is_valid() else '—'}")
+        if hasattr(self, "lbl_spawn"):
+            dr, fa = self.cfg.dread_region, self.cfg.faction_region
+            self.lbl_spawn.config(
+                text=(f"Dread: {'an' if self.cfg.dread_enabled else 'aus'} "
+                      f"{dr.as_tuple() if dr.is_valid() else '—'}   ·   "
+                      f"Faction: {'an' if self.cfg.faction_enabled else 'aus'} "
+                      f"{fa.as_tuple() if fa.is_valid() else '—'}"))
         if hasattr(self, "btn_start"):
             self._update_ready()
 

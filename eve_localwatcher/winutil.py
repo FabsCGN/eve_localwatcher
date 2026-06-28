@@ -81,3 +81,47 @@ def find_window_rect(title_substring: str) -> Optional[Tuple[int, int, int, int]
         return win32gui.GetWindowRect(hwnd)
     except Exception:
         return None
+
+
+def tk_hwnd(window) -> Optional[int]:
+    """Native top-level HWND of a Tk window.
+
+    Tk's ``winfo_id`` returns the inner frame; its parent is the decorated
+    top-level the OS knows about — the one we must restyle for click-through.
+    """
+    try:
+        import ctypes
+        return ctypes.windll.user32.GetParent(window.winfo_id())
+    except Exception:
+        return None
+
+
+def set_click_through(hwnd: int, on: bool) -> bool:
+    """Toggle mouse click-through on a window (Windows only).
+
+    Adds ``WS_EX_LAYERED`` (required) and sets/clears ``WS_EX_TRANSPARENT`` so
+    clicks fall through to whatever is underneath. Returns False on any failure.
+    """
+    if not hwnd:
+        return False
+    try:
+        import ctypes
+        GWL_EXSTYLE = -20
+        WS_EX_LAYERED = 0x00080000
+        WS_EX_TRANSPARENT = 0x00000020
+        user32 = ctypes.windll.user32
+        try:                       # 64-bit safe variants when present
+            get = user32.GetWindowLongPtrW
+            put = user32.SetWindowLongPtrW
+        except AttributeError:     # 32-bit Python
+            get = user32.GetWindowLongW
+            put = user32.SetWindowLongW
+        style = get(hwnd, GWL_EXSTYLE) | WS_EX_LAYERED
+        if on:
+            style |= WS_EX_TRANSPARENT
+        else:
+            style &= ~WS_EX_TRANSPARENT
+        put(hwnd, GWL_EXSTYLE, style)
+        return True
+    except Exception:
+        return False
