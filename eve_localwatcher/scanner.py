@@ -56,6 +56,8 @@ class TickResult:
     last_wave: bool = False             # currently on the final pocket (detectors armed)
     dread_spawn: bool = False           # Dread/Titan overview went empty → populated
     faction_spawn: bool = False         # Faction overview went empty → populated
+    dread_lit: Optional[int] = None     # lit pixels in the dread overview (diagnostics)
+    faction_lit: Optional[int] = None   # lit pixels in the faction overview
     threat_names: List[str] = field(default_factory=list)  # OCR'd names (auto-threat)
     error: Optional[str] = None
 
@@ -127,6 +129,27 @@ def sample_rows(capture_img: np.ndarray, cfg: Config, n_rows: int) -> List[RowSa
     return out
 
 
+def _lit_pixels(img: np.ndarray, threshold: int) -> int:
+    """Count pixels brighter than ``threshold`` (grey = 0.299R+0.587G+0.114B)."""
+    gray = 0.299 * img[:, :, 0] + 0.587 * img[:, :, 1] + 0.114 * img[:, :, 2]
+    return int((gray > threshold).sum())
+
+
+def probe_spawn_region(cfg: Config, region) -> Optional[Tuple[int, int, bool]]:
+    """One-shot presence probe of a spawn-detector overview region (UI test).
+
+    Returns ``(lit_px, needed_px, populated)`` — or None when the region is
+    unset or window-relative and the EVE window can't be found.
+    """
+    reg = resolve_one(cfg, region)
+    if reg is None:
+        return None
+    from .capture import grab_once
+    img = grab_once(reg)
+    lit = _lit_pixels(img, cfg.spawn_brightness_thr)
+    return lit, cfg.spawn_min_bright_px, lit >= cfg.spawn_min_bright_px
+
+
 def ocr_row_name(capture_img: np.ndarray, cfg: Config, row_index: int) -> str:
     """OCR the name text of one pilot row (for the auto threat-check)."""
     h, w, _ = capture_img.shape
@@ -142,6 +165,12 @@ def ocr_row_name(capture_img: np.ndarray, cfg: Config, row_index: int) -> str:
 
 
 class Scanner:
+    # Ticks the pocket counter may be unreadable before last-wave mode ends
+    # (~60 s at the default 750 ms interval). The counter is often occluded or
+    # unreadable mid-fight — ending last-wave mode after only a few misses
+    # would silently disarm the spawn detectors before the spawn appears.
+    LAST_WAVE_HOLD_TICKS = 80
+
     def __init__(self, cfg: Config, on_tick: TickCB, on_alarm: AlarmCB,
                  on_config_change: Optional[Callable[[], None]] = None) -> None:
         self.cfg = cfg
@@ -297,20 +326,27 @@ class Scanner:
                     if self._haven_none_streak >= 3:
                         self._haven_armed = True
                         self._haven_last_stage = None
+                    # Last-wave mode is held much longer: the counter being
+                    # unreadable mid-fight must not disarm the spawn detectors.
+                    # A fresh site (counter < total) still ends it immediately.
+                    if self._haven_none_streak >= self.LAST_WAVE_HOLD_TICKS:
                         self._end_last_wave()
                 else:
                     self._haven_none_streak = 0
                     haven_stage, haven_total = frac
                     haven_reached = self._update_haven(haven_stage, haven_total)
 
-        # --- Stage 4: last-wave spawn detectors (gated on the final pocket) ---
+        # --- Stage 4: last-wave spawn detectors --------------------------
+        # Measured every tick (so the UI can show live pixel counts for
+        # diagnosis) but fires only while the final pocket is active.
         dread_spawn = faction_spawn = False
-        if self._last_wave_active:
-            if self.cfg.dread_enabled:
-                dread_spawn = self._detect_spawn(cap, self.cfg.dread_region, "dread")
-            if self.cfg.faction_enabled:
-                faction_spawn = self._detect_spawn(cap, self.cfg.faction_region,
-                                                   "faction")
+        dread_lit = faction_lit = None
+        if self.cfg.dread_enabled:
+            dread_spawn, dread_lit = self._detect_spawn(
+                cap, self.cfg.dread_region, "dread")
+        if self.cfg.faction_enabled:
+            faction_spawn, faction_lit = self._detect_spawn(
+                cap, self.cfg.faction_region, "faction")
 
         return TickResult(
             ok=True, window_found=window_found, count=count, rows=rows,
@@ -318,6 +354,7 @@ class Scanner:
             cap_region=cap_region, haven_stage=haven_stage, haven_total=haven_total,
             haven_reached=haven_reached, last_wave=self._last_wave_active,
             dread_spawn=dread_spawn, faction_spawn=faction_spawn,
+            dread_lit=dread_lit, faction_lit=faction_lit,
             threat_names=threat_names)
 
     # --------------------------------------------------------------- haven
@@ -363,31 +400,34 @@ class Scanner:
         self._faction_armed = True
 
     # ------------------------------------------------------- spawn detectors
-    def _detect_spawn(self, cap: "Capturer", region, which: str) -> bool:
-        """True once when ``region``'s overview goes from empty to populated.
+    def _detect_spawn(self, cap: "Capturer", region,
+                      which: str) -> Tuple[bool, Optional[int]]:
+        """(fired, lit_px) — fires once when the overview goes empty → populated.
 
         Presence is brightness-based: a populated overview row lights up pixels
-        above the dark background. Fires once, re-arms when the overview empties.
+        above the dark background. The pixel count is always measured (for the
+        UI diagnostics); the edge trigger only runs during the last wave and
+        re-arms when the overview empties.
         """
         reg = resolve_one(self.cfg, region)
         if reg is None:
-            return False
+            return False, None
         try:
             img = cap.grab(reg)
         except Exception:
-            return False
-        gray = (0.299 * img[:, :, 0] + 0.587 * img[:, :, 1]
-                + 0.114 * img[:, :, 2])
-        lit = int((gray > self.cfg.spawn_brightness_thr).sum())
+            return False, None
+        lit = _lit_pixels(img, self.cfg.spawn_brightness_thr)
+        if not self._last_wave_active:
+            return False, lit
         populated = lit >= self.cfg.spawn_min_bright_px
         armed_attr = f"_{which}_armed"
         if populated:
             if getattr(self, armed_attr):
                 setattr(self, armed_attr, False)
-                return True
+                return True, lit
         else:
             setattr(self, armed_attr, True)
-        return False
+        return False, lit
 
     # ------------------------------------------------------------- debounce
     def _update_threat_debounce(self, threats: List[RowSample]) -> bool:
