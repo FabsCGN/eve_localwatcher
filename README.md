@@ -5,7 +5,11 @@ deines laufenden EVE-Clients und schlägt **sofort Alarm, wenn ein
 nicht-befreundeter Pilot auftaucht** — nicht erst, wenn er etwas schreibt.
 Zusätzlich kann es beim Ratten/Havens den letzten Wave-Counter überwachen,
 Dread/Titan- oder Faction-Spawns erkennen, und jeden verdächtigen Piloten per
-Knopfdruck online nachschlagen (zKillboard, EVE-eigene Datenbank).
+Knopfdruck online nachschlagen (zKillboard, EVE-eigene Datenbank) — inklusive
+**Waffen-Reichweite aus seinem letzten Kill** und einer **Cyno-Alt-Warnung**.
+Ein **Kill-Radar** verfolgt zusätzlich Kills und deinen Intel-Kanal rund um
+dein System und warnt, wenn sich jemand nachweislich nähert — bevor er im
+Local steht.
 
 **Wichtig — was das Tool NICHT tut:** Es klickt nichts, tippt nichts und
 greift nie in das Spiel ein. Es macht nur **Screenshots eines kleinen
@@ -123,7 +127,7 @@ python -m eve_localwatcher
 
 Die App nutzt ein **modernes dunkles Design** (Sun-Valley-Theme im
 Windows-11-Stil, inklusive dunkler Titelleiste). Der **Fenstertitel zeigt
-immer die Versionsnummer** an (z. B. „… — v2.0.0-beta.1"), damit du sofort
+immer die Versionsnummer** an (z. B. „… — v2.0.0-beta.2"), damit du sofort
 siehst, welchen Stand eine .exe hat. Sollte das Theme-Paket einmal fehlen,
 startet die App trotzdem — dann nur im schlichten Standard-Look.
 
