@@ -118,6 +118,8 @@ class Config:
     enrichment_enabled: bool = False
     zkill_contact: str = ""          # e-mail/char for the API User-Agent (etiquette)
     fresh_char_days: int = 90        # char younger than this → fresh-char warning
+    cyno_max_kills: int = 5          # ≤ this many kills counts as "empty board"
+    cyno_min_age_days: int = 365     # older + empty board + alliance → cyno suspect
     sso_client_id: str = ""          # your EVE app client id (developers.eveonline.com)
     sso_refresh_token: Optional[str] = None   # stored after one-time SSO login
     sso_character_id: Optional[int] = None
@@ -164,6 +166,8 @@ class Config:
             "enrichment_enabled": self.enrichment_enabled,
             "zkill_contact": self.zkill_contact,
             "fresh_char_days": self.fresh_char_days,
+            "cyno_max_kills": self.cyno_max_kills,
+            "cyno_min_age_days": self.cyno_min_age_days,
             "sso_client_id": self.sso_client_id,
             "sso_refresh_token": self.sso_refresh_token,
             "sso_character_id": self.sso_character_id,
@@ -222,6 +226,8 @@ class Config:
         c.enrichment_enabled = d.get("enrichment_enabled", c.enrichment_enabled)
         c.zkill_contact = d.get("zkill_contact", c.zkill_contact)
         c.fresh_char_days = d.get("fresh_char_days", c.fresh_char_days)
+        c.cyno_max_kills = d.get("cyno_max_kills", c.cyno_max_kills)
+        c.cyno_min_age_days = d.get("cyno_min_age_days", c.cyno_min_age_days)
         c.sso_client_id = d.get("sso_client_id", c.sso_client_id)
         c.sso_refresh_token = d.get("sso_refresh_token", c.sso_refresh_token)
         c.sso_character_id = d.get("sso_character_id", c.sso_character_id)

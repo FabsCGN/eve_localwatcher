@@ -25,6 +25,8 @@
   "enrichment_enabled": false,
   "zkill_contact": "",
   "fresh_char_days": 90,
+  "cyno_max_kills": 5,
+  "cyno_min_age_days": 365,
   "sso_client_id": "",
   "sso_refresh_token": null,
   "sso_character_id": null,

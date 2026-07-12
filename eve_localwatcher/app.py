@@ -23,7 +23,7 @@ from .ui_tooltip import attach as tip
 # Threat-panel colours per tier and the German labels for each warning flag.
 TIER_COLOR = {"high": "#b30000", "medium": "#b8860b", "low": "#1a7a3c",
               "unknown": "#666666"}
-FLAG_LABEL = {"hunter": "Hunter", "fresh": "Frischer Char", "cyno": "Cyno-Verdacht",
+FLAG_LABEL = {"hunter": "Hunter", "fresh": "Frischer Char", "cyno": "CYNO?",
               "scanner": "Mögl. Scanner", "unknown": "Nicht aufgelöst"}
 
 OVERLAY_SECONDS = 6
@@ -603,9 +603,11 @@ class App:
             .grid(row=base + 2, column=1, sticky="w", padx=6, pady=3)
         btn_probe = ttk.Button(parent, text="Erkennung testen", command=probe_test)
         btn_probe.grid(row=base + 2, column=2, sticky="w", padx=4, pady=3)
-        tip(btn_probe, "Liest den Overview-Bereich JETZT aus und schreibt ins Log, "
-                       "ob er als belegt erkannt würde. Zum Prüfen etwas ins "
-                       "Overview holen (z. B. Filter kurz rausnehmen).")
+        tip(btn_probe, "Liest den Overview-Bereich JETZT aus und vergleicht ihn "
+                       "mit dem gelernten Leerzustand (Alarm = Veränderung, "
+                       "statischer Text wie 'Nothing Found' stört nicht). Zum "
+                       "Prüfen bei laufendem Scan etwas ins Overview holen "
+                       "(z. B. Filter kurz rausnehmen).")
         self._vol_slider(parent, base + 3, v_vol)
 
     # ----------------------------------------------------------- previews
@@ -1059,8 +1061,10 @@ class App:
         region = (self.cfg.dread_region if which == "dread"
                   else self.cfg.faction_region)
         name = "Dread/Titan" if which == "dread" else "Faction"
+        baseline = getattr(self.scanner, f"_{which}_baseline", None) \
+            if self.scanner.is_running() else None
         try:
-            res = probe_spawn_region(self.cfg, region)
+            res = probe_spawn_region(self.cfg, region, baseline)
         except Exception as e:
             self._log(f"❌ {name}-Erkennungstest fehlgeschlagen: {e}")
             return
@@ -1068,11 +1072,18 @@ class App:
             self._log(f"❌ {name}: Overview-Bereich nicht gesetzt oder EVE-Fenster "
                       f"nicht gefunden.")
             return
-        lit, needed, populated = res
-        verdict = ("BELEGT — würde in der letzten Welle auslösen" if populated
-                   else "leer — kein Alarm")
-        self._log(f"🔍 {name}-Overview: {lit} helle Pixel "
-                  f"(Schwelle {needed}) → {verdict}")
+        lit, changed, needed = res
+        if changed is not None:
+            verdict = ("BELEGT — würde in der letzten Welle auslösen"
+                       if changed >= needed else "wie Leerzustand — kein Alarm")
+            self._log(f"🔍 {name}-Overview: {changed} Pixel verändert ggü. "
+                      f"Leerzustand (Schwelle {needed}, {lit} helle gesamt) "
+                      f"→ {verdict}")
+        else:
+            self._log(f"🔍 {name}-Overview: Bereich OK, {lit} helle Pixel. "
+                      f"Der Leerzustand wird beim Scannen automatisch gelernt — "
+                      f"Alarm, wenn sich in der letzten Welle ≥{needed} Pixel "
+                      f"dagegen ändern.")
 
     # ----------------------------------------------------------- threat-check
     def _refresh_ocr_warning(self) -> None:
@@ -1270,7 +1281,26 @@ class App:
                 label = FLAG_LABEL[fl]
                 if fl == "fresh" and p.age_days is not None:
                     label = f"Frischer Char · {p.age_days}d"
-                self._chip(chips, label, p.tier if fl in ("hunter", "cyno") else "info")
+                # a cyno suspect is always shown in red, whatever the tier says
+                w = self._chip(chips, label, "high" if fl == "cyno"
+                               else (p.tier if fl == "hunter" else "info"))
+                if fl == "cyno":
+                    tip(w, "Cyno-Alt-Profil: junger Char ohne Kills ODER alter "
+                           "Char (>1 Jahr) mit leerem Killboard in einer "
+                           "Allianz. Kann eine Capital-Eskalation zünden.")
+        if p.recent_weapon_name:
+            label = f"⚔ {p.recent_weapon_name}"
+            if p.recent_weapon_range_km:
+                label += f" ~{p.recent_weapon_range_km:.0f} km"
+                if p.recent_weapon_falloff_km:
+                    label += f" (+{p.recent_weapon_falloff_km:.0f} km Falloff)"
+            w = self._chip(chips, label, "weapon")
+            det = f"Kill vor {p.recent_kill_min_ago} min mit dieser Waffe."
+            if p.recent_weapon_range_km:
+                det += (f"\nMax. Reichweite mit {p.recent_weapon_charge or 'bester Munition'}"
+                        " — alle Skills V, nur Waffe + Schiffshülle, ohne "
+                        "Module/Rigs/Booster.")
+            tip(w, det)
         if p.recent_ships:
             ships = tk.Frame(mid)
             ships.pack(anchor="w", pady=(3, 0))
@@ -1329,13 +1359,17 @@ class App:
             return f"{int(secs // 86400)}d"
         return f"{int(secs // (7 * 86400))}w"
 
-    def _chip(self, parent, text, kind) -> None:
+    def _chip(self, parent, text, kind) -> tk.Label:
         bg = {"high": "#f3d0d0", "medium": "#f6e6c8", "low": "#d9ead0",
-              "unknown": "#e2e0da", "info": "#d6e6f5"}.get(kind, "#e2e0da")
+              "unknown": "#e2e0da", "info": "#d6e6f5",
+              "weapon": "#e6d5f5"}.get(kind, "#e2e0da")
         fg = {"high": "#791f1f", "medium": "#633806", "low": "#27500a",
-              "unknown": "#444441", "info": "#0c447c"}.get(kind, "#444441")
-        tk.Label(parent, text=text, bg=bg, fg=fg, font=("Segoe UI", 8),
-                 padx=6, pady=1).pack(side="left", padx=2)
+              "unknown": "#444441", "info": "#0c447c",
+              "weapon": "#5a2d8a"}.get(kind, "#444441")
+        lab = tk.Label(parent, text=text, bg=bg, fg=fg, font=("Segoe UI", 8),
+                       padx=6, pady=1)
+        lab.pack(side="left", padx=2)
+        return lab
 
     def _threat_done(self, agg, filtered) -> None:
         # re-render sorted by severity
@@ -1348,7 +1382,8 @@ class App:
         if agg["unresolved"]:
             cov += f" · {agg['unresolved']} unbekannt"
         head = (f"{agg['total']} nicht-blau · {agg['dangerous']} gefährlich · "
-                f"{agg['hunters']} Hunter · {agg['fresh']} frisch · {cov}")
+                f"{agg['hunters']} Hunter · {agg.get('cyno', 0)} Cyno? · "
+                f"{agg['fresh']} frisch · {cov}")
         worst = "low"
         for p in self._threat_profiles:
             if {"high": 0, "medium": 1}.get(p.tier, 9) < {"high": 0, "medium": 1}.get(worst, 9):
@@ -1401,6 +1436,21 @@ class App:
                 elif kind == "threat_row":
                     self._threat_profiles.append(payload)
                     self._render_threat_row(payload)
+                    if payload.recent_weapon_name:
+                        msg = (f"⚔ {payload.name}: Kill vor "
+                               f"{payload.recent_kill_min_ago} min mit "
+                               f"{payload.recent_weapon_name}")
+                        if payload.recent_weapon_range_km:
+                            msg += f" (~{payload.recent_weapon_range_km:.0f} km"
+                            if payload.recent_weapon_falloff_km:
+                                msg += f" +{payload.recent_weapon_falloff_km:.0f} km Falloff"
+                            msg += ")"
+                        self._log(msg)
+                    if "cyno" in payload.flags:
+                        self._log(f"⚠ CYNO? {payload.name} — "
+                                  f"{payload.ships_destroyed} Kills, "
+                                  f"{payload.age_days if payload.age_days is not None else '?'}d alt, "
+                                  f"Allianz: {payload.alliance_name or '—'}")
                 elif kind == "threat_done":
                     self._threat_done(*payload)
                 elif kind == "threat_err":
@@ -1435,12 +1485,15 @@ class App:
         if r.last_wave:
             parts.append("LETZTE WELLE")
         # Live pixel counts of the spawn-detector overviews ('?' = region not
-        # resolvable) so a mis-set region or threshold is visible at a glance.
+        # resolvable): bright pixels while learning the empty state, Δ = changed
+        # pixels vs. that baseline during the last wave (what actually triggers).
+        d = "Δ" if r.last_wave else ""
         if self.cfg.dread_enabled:
-            parts.append(f"Dread {r.dread_lit if r.dread_lit is not None else '?'}px")
+            parts.append(
+                f"Dread {d}{r.dread_lit if r.dread_lit is not None else '?'}px")
         if self.cfg.faction_enabled:
             parts.append(
-                f"Faction {r.faction_lit if r.faction_lit is not None else '?'}px")
+                f"Faction {d}{r.faction_lit if r.faction_lit is not None else '?'}px")
         self.lbl_metrics.config(text="   ·   ".join(parts))
 
         if bool(r.last_wave) != self._lw_prev:

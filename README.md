@@ -147,23 +147,30 @@ anfliegen.*
 **2. + 3. Spawn-Detektoren (Dread/Titan, Faction-Battleship).** Erzeuge in EVE
 **zwei eigene Overview-Fenster**, eines gefiltert auf Dreads/Titans, eines auf
 die Faction-Battleships. Jeder Detektor beobachtet sein Overview-Rechteck und
-schlägt Alarm, **sobald dort etwas erscheint** (Helligkeits-Erkennung: leer =
-dunkel, Spawn = helle Zeile). Feuert einmal pro Spawn, re-armt wenn das Overview
-wieder leer ist.
+schlägt Alarm, **sobald sich dort etwas verändert**: Solange die letzte Welle
+nicht läuft, lernt der Scanner laufend, wie das **leere** Overview aussieht —
+inklusive statischer heller Texte wie „Nothing Found" oder der Spaltenköpfe,
+die stören also nicht. In der letzten Welle wird gegen diesen Leerzustand
+verglichen; erscheint eine NPC-Zeile, ändern sich genug Pixel → Alarm. Feuert
+einmal pro Spawn, re-armt wenn das Overview wieder dem Leerzustand entspricht.
 
 - Frame **„Spawn-Detektoren"**: je Block aktivieren, **„Overview-Bereich
-  festlegen"** (nur den Zeilenbereich, ohne Spaltenköpfe), Sound + Lautstärke.
+  festlegen"** (der Zeilenbereich; „Nothing Found"/Spaltenköpfe im Rechteck sind
+  unschädlich), Sound + Lautstärke. Das Overview-Fenster während der Site
+  **nicht verschieben oder umfiltern** — sonst gilt die Änderung als Spawn.
 - **Nur in der letzten Welle scharf:** die Spawn-Detektoren werten erst, wenn der
   Pocket-Counter die letzte Pocket erreicht hat. Sie **brauchen** also den
   aktiven „Letzte Welle"-Counter. Ist der Counter mittendrin kurz nicht lesbar
   (Kamera, Verdeckung), bleiben die Detektoren bis zu **~60 s** scharf; ein
   frischer Counter (`1/6`) beendet die letzte Welle sofort.
-- **„Erkennung testen"**: liest das Overview-Rechteck sofort aus und schreibt ins
-  Log, ob es als belegt erkannt würde — zum Prüfen einfach kurz den Filter
-  rausnehmen, damit etwas im Overview steht.
+- **„Erkennung testen"**: liest das Overview-Rechteck sofort aus und vergleicht
+  es bei laufendem Scan mit dem gelernten Leerzustand — zum Prüfen einfach kurz
+  den Filter rausnehmen, damit etwas im Overview steht.
 - **Live-Diagnose:** die Statuszeile zeigt bei aktivierten Detektoren laufend
-  `Dread N px` / `Faction N px` (helle Pixel im Rechteck; `?` = Bereich nicht
-  auflösbar) sowie `LETZTE WELLE`, solange die Detektoren scharf sind. Das
+  `Dread N px` / `Faction N px` (`?` = Bereich nicht auflösbar) sowie
+  `LETZTE WELLE`, solange die Detektoren scharf sind. Außerhalb der letzten
+  Welle ist N die Zahl heller Pixel (Platzierungs-Check), in der letzten Welle
+  `ΔN` = gegenüber dem Leerzustand veränderte Pixel (das, was auslöst). Das
   Scharf-/Unscharf-Schalten wird zusätzlich geloggt.
 
 Alle laufen im selben Scan-Loop wie der Hostile-Scan; mehrere Alarme können
@@ -186,8 +193,9 @@ Wird automatisch unter `%USERPROFILE%\.eve_localwatcher\config.json` gespeichert
 | `alarm_sound_path`, `alarm_volume` | optionaler WAV + Lautstärke 0–100 (Hostile) |
 | `haven_*`, `dread_*`, `faction_*` | Region/Sound/Lautstärke je Detektor (Letzte Welle, Dread/Titan, Faction) |
 | `haven_expected_total` | Max. Pockets (Default 6) — Plausibilitätsgrenze gegen OCR-Fehler |
-| `spawn_brightness_thr`, `spawn_min_bright_px` | Schwellen der Spawn-Präsenzerkennung (heller Pixel-Anteil) |
+| `spawn_brightness_thr`, `spawn_min_bright_px` | Spawn-Erkennung: min. Grauwert-Änderung pro Pixel ggü. Leerzustand (Default 70) und min. Anzahl veränderter Pixel (Default 12) |
 | `intel_*` | Intel-Fenster: Position, Transparenz, Immer-oben, Klick-durch |
+| `cyno_max_kills`, `cyno_min_age_days` | Cyno-Verdacht-Heuristik: ≤ so viele Kills gilt als „leeres Board" (Default 5), Mindestalter des Chars (Default 365 Tage) |
 | `auto_learn_enabled` | **Default aus** — ein still sitzender Hostile würde sonst als safe gelernt |
 
 ## Alarm-Popups platzieren
@@ -202,6 +210,39 @@ aus (Rückkopplung). Deshalb beide Popups **weg von den Bereichen** legen:
   Neustart).
 - Ohne gespeicherte Position erscheinen die Popups oben-zentriert (vier Alarm-
   arten gestapelt: Hostile, Letzte Welle, Dread/Titan, Faction).
+
+## Waffen-Range-Intel (Kill in den letzten 2 h)
+
+Hatte ein gescannter Pilot **innerhalb der letzten 2 Stunden einen Kill**, zeigt
+seine Zeile im Intel-Fenster einen violetten Chip mit dem verwendeten
+Waffensystem und dessen **maximal möglicher Reichweite**, z. B.
+`⚔ Heavy Beam Laser II ~74 km (+10 km Falloff)`; dieselbe Info erscheint als
+Log-Zeile. Die Berechnung nimmt den Worst Case an:
+
+- Munition mit dem höchsten Range-Multiplikator geladen (z. B. Aurora bei
+  Beam-Lasern, Spike bei Railguns — Killmails verraten die echte Ladung nicht),
+- alle relevanten Skills auf V (Sharpshooter, Missile Projection/Bombardment),
+- Hüllen-Range-Boni des geflogenen Schiffs — **ohne** Module, Rigs oder Booster.
+
+Abgedeckt sind Turrets (Optimal + Falloff) und Missiles (Flugzeit × Geschwindig-
+keit). Bei Drohnen, Smartbombs o. Ä. wird nur der Waffenname ohne Range gezeigt.
+Die Daten stammen aus einer beim Build gebündelten SDE-Tabelle
+(`eve_localwatcher/data/weapon_ranges.json`, regenerierbar mit
+`python tools/gen_weapon_ranges.py`) — zur Laufzeit fallen dafür keine
+zusätzlichen API-Calls an.
+
+## Cyno-Verdacht
+
+Der Threat-Check markiert Piloten mit dem typischen Profil eines **Cyno-Alts**
+mit einem roten `CYNO?`-Chip (plus Log-Zeile). Zwei Muster werden erkannt:
+
+- **junger Char** (< `fresh_char_days`) mit fast keinen Kills (bestehende Logik),
+- **alter Char** (> `cyno_min_age_days`, Default 1 Jahr) mit leerem Killboard
+  (≤ `cyno_max_kills`), der trotzdem in einer **Allianz** sitzt — ein geparkter,
+  hochgeskillter Zünd-Alt.
+
+Ein Cyno-Verdacht hebt die Einstufung des Piloten auf mindestens „medium";
+die Kopfzeile des Intel-Fensters zählt die Verdachtsfälle mit.
 
 ## Intel-Fenster (Threat-Check als Overlay)
 

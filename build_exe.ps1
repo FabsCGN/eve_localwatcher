@@ -25,6 +25,7 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed `
     --hidden-import win32gui `
     --hidden-import win32api `
     --collect-submodules mss `
+    --add-data "eve_localwatcher\data\weapon_ranges.json;eve_localwatcher/data" `
     @iconArg `
     run.py
 

@@ -129,25 +129,34 @@ def sample_rows(capture_img: np.ndarray, cfg: Config, n_rows: int) -> List[RowSa
     return out
 
 
+def _grey(img: np.ndarray) -> np.ndarray:
+    """Perceptual grey (0.299R+0.587G+0.114B) as a float array."""
+    return 0.299 * img[:, :, 0] + 0.587 * img[:, :, 1] + 0.114 * img[:, :, 2]
+
+
 def _lit_pixels(img: np.ndarray, threshold: int) -> int:
-    """Count pixels brighter than ``threshold`` (grey = 0.299R+0.587G+0.114B)."""
-    gray = 0.299 * img[:, :, 0] + 0.587 * img[:, :, 1] + 0.114 * img[:, :, 2]
-    return int((gray > threshold).sum())
+    """Count pixels brighter than ``threshold``."""
+    return int((_grey(img) > threshold).sum())
 
 
-def probe_spawn_region(cfg: Config, region) -> Optional[Tuple[int, int, bool]]:
-    """One-shot presence probe of a spawn-detector overview region (UI test).
+def probe_spawn_region(cfg: Config, region, baseline=None) -> Optional[Tuple]:
+    """One-shot probe of a spawn-detector overview region (UI test button).
 
-    Returns ``(lit_px, needed_px, populated)`` — or None when the region is
-    unset or window-relative and the EVE window can't be found.
+    Returns ``(lit_px, changed_px, needed_px)`` — ``changed_px`` compares
+    against ``baseline`` (the scanner's learned empty state) and is None when
+    no comparable baseline exists. Returns None when the region is unset or
+    window-relative and the EVE window can't be found.
     """
     reg = resolve_one(cfg, region)
     if reg is None:
         return None
     from .capture import grab_once
-    img = grab_once(reg)
-    lit = _lit_pixels(img, cfg.spawn_brightness_thr)
-    return lit, cfg.spawn_min_bright_px, lit >= cfg.spawn_min_bright_px
+    gray = _grey(grab_once(reg))
+    lit = int((gray > cfg.spawn_brightness_thr).sum())
+    changed = None
+    if baseline is not None and baseline.shape == gray.shape:
+        changed = int((np.abs(gray - baseline) > cfg.spawn_brightness_thr).sum())
+    return lit, changed, cfg.spawn_min_bright_px
 
 
 def ocr_row_name(capture_img: np.ndarray, cfg: Config, row_index: int) -> str:
@@ -194,6 +203,12 @@ class Scanner:
         # when it becomes populated, re-arm when it empties again.
         self._dread_armed: bool = True
         self._faction_armed: bool = True
+        # learned grey image of the EMPTY overview (refreshed outside the last
+        # wave, frozen during it). Detection is change-vs-baseline, because an
+        # "empty" overview is NOT dark: "Nothing Found" and the column headers
+        # are bright static text that absolute brightness misreads as populated.
+        self._dread_baseline: Optional[np.ndarray] = None
+        self._faction_baseline: Optional[np.ndarray] = None
 
     # ---------------------------------------------------------------- lifecycle
     def start(self) -> None:
@@ -224,6 +239,8 @@ class Scanner:
         self._last_wave_active = False
         self._dread_armed = True
         self._faction_armed = True
+        self._dread_baseline = None
+        self._faction_baseline = None
 
     # -------------------------------------------------------------------- loop
     def _run(self) -> None:
@@ -402,12 +419,16 @@ class Scanner:
     # ------------------------------------------------------- spawn detectors
     def _detect_spawn(self, cap: "Capturer", region,
                       which: str) -> Tuple[bool, Optional[int]]:
-        """(fired, lit_px) — fires once when the overview goes empty → populated.
+        """(fired, px) — fires once when the overview changes empty → populated.
 
-        Presence is brightness-based: a populated overview row lights up pixels
-        above the dark background. The pixel count is always measured (for the
-        UI diagnostics); the edge trigger only runs during the last wave and
-        re-arms when the overview empties.
+        Presence is change-vs-baseline, NOT absolute brightness: the ingame
+        filter guarantees the overview is empty outside the last wave, so we
+        keep re-learning that empty look (incl. static bright text like
+        "Nothing Found" / column headers) every tick and freeze it as the
+        baseline once the last wave starts. A spawn then flips enough pixels
+        against the baseline; when the overview matches the baseline again the
+        detector re-arms. Reported px = bright pixels outside the last wave
+        (placement diagnostics), changed-vs-baseline pixels during it.
         """
         reg = resolve_one(self.cfg, region)
         if reg is None:
@@ -416,18 +437,27 @@ class Scanner:
             img = cap.grab(reg)
         except Exception:
             return False, None
-        lit = _lit_pixels(img, self.cfg.spawn_brightness_thr)
+        gray = _grey(img)
+        base_attr = f"_{which}_baseline"
         if not self._last_wave_active:
-            return False, lit
-        populated = lit >= self.cfg.spawn_min_bright_px
+            setattr(self, base_attr, gray)     # keep re-learning "empty"
+            return False, int((gray > self.cfg.spawn_brightness_thr).sum())
+        baseline = getattr(self, base_attr)
+        if baseline is None or baseline.shape != gray.shape:
+            # first sight mid-wave (scan started late / window resized):
+            # treat the current view as empty instead of guessing
+            setattr(self, base_attr, gray)
+            return False, 0
+        changed = int((np.abs(gray - baseline) > self.cfg.spawn_brightness_thr).sum())
+        populated = changed >= self.cfg.spawn_min_bright_px
         armed_attr = f"_{which}_armed"
         if populated:
             if getattr(self, armed_attr):
                 setattr(self, armed_attr, False)
-                return True, lit
+                return True, changed
         else:
             setattr(self, armed_attr, True)
-        return False, lit
+        return False, changed
 
     # ------------------------------------------------------------- debounce
     def _update_threat_debounce(self, threats: List[RowSample]) -> bool:

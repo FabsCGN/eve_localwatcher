@@ -56,6 +56,12 @@ class ThreatProfile:
     ships_lost: int = 0
     top_groups: List[Tuple[int, int]] = field(default_factory=list)  # (groupID, uses)
     recent_ships: List[RecentShip] = field(default_factory=list)
+    # weapon used on a kill within the last 2 h (max range: best ammo, all V)
+    recent_weapon_name: Optional[str] = None
+    recent_weapon_range_km: Optional[float] = None
+    recent_weapon_falloff_km: Optional[float] = None
+    recent_weapon_charge: Optional[str] = None
+    recent_kill_min_ago: Optional[int] = None
     flags: Set[str] = field(default_factory=set)   # hunter/fresh/cyno/scanner/unknown
     tier: str = "unknown"
     resolved: bool = True
@@ -93,7 +99,8 @@ def unresolved(name: str) -> ThreatProfile:
 
 def assess(name: str, char_id: Optional[int], char_pub: Optional[dict],
            zstats: Optional[dict], corp_name: Optional[str],
-           alliance_name: Optional[str], fresh_days: int = 90) -> ThreatProfile:
+           alliance_name: Optional[str], fresh_days: int = 90,
+           cyno_max_kills: int = 5, cyno_min_age_days: int = 365) -> ThreatProfile:
     p = ThreatProfile(name=name, character_id=char_id, corp_name=corp_name,
                       alliance_name=alliance_name)
     p.age_days = _age_days((char_pub or {}).get("birthday"))
@@ -128,6 +135,12 @@ def assess(name: str, char_id: Optional[int], char_pub: Optional[dict],
         p.flags.add("fresh")
         if p.ships_destroyed < 5:
             p.flags.add("cyno")        # young + almost no kills → cyno-alt suspicion
+    # The other classic cyno population: an AGED char with an empty killboard
+    # that still sits in an alliance — a parked, skill-farmed dedicated alt.
+    if (p.age_days is not None and p.age_days >= cyno_min_age_days
+            and p.ships_destroyed <= cyno_max_kills
+            and alliance_name):
+        p.flags.add("cyno")
     # scanner: dominant covops use, not a hunter, low/unknown danger (neutral hint)
     if ("hunter" not in p.flags and total_uses
             and scanner_uses / total_uses >= 0.4
@@ -156,5 +169,6 @@ def aggregate(profiles: List[ThreatProfile]) -> Dict[str, int]:
         "dangerous": sum(1 for p in resolved if p.tier in ("high", "medium")),
         "hunters": sum(1 for p in resolved if "hunter" in p.flags),
         "fresh": sum(1 for p in resolved if "fresh" in p.flags),
+        "cyno": sum(1 for p in resolved if "cyno" in p.flags),
         "scanners": sum(1 for p in resolved if "scanner" in p.flags),
     }
