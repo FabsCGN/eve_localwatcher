@@ -188,6 +188,7 @@ Wird automatisch unter `%USERPROFILE%\.eve_localwatcher\config.json` gespeichert
 | `haven_expected_total` | Max. Pockets (Default 6) — Plausibilitätsgrenze gegen OCR-Fehler |
 | `spawn_brightness_thr`, `spawn_min_bright_px` | Schwellen der Spawn-Präsenzerkennung (heller Pixel-Anteil) |
 | `intel_*` | Intel-Fenster: Position, Transparenz, Immer-oben, Klick-durch |
+| `cyno_max_kills`, `cyno_min_age_days` | Cyno-Verdacht-Heuristik: ≤ so viele Kills gilt als „leeres Board" (Default 5), Mindestalter des Chars (Default 365 Tage) |
 | `auto_learn_enabled` | **Default aus** — ein still sitzender Hostile würde sonst als safe gelernt |
 
 ## Alarm-Popups platzieren
@@ -202,6 +203,39 @@ aus (Rückkopplung). Deshalb beide Popups **weg von den Bereichen** legen:
   Neustart).
 - Ohne gespeicherte Position erscheinen die Popups oben-zentriert (vier Alarm-
   arten gestapelt: Hostile, Letzte Welle, Dread/Titan, Faction).
+
+## Waffen-Range-Intel (Kill in den letzten 2 h)
+
+Hatte ein gescannter Pilot **innerhalb der letzten 2 Stunden einen Kill**, zeigt
+seine Zeile im Intel-Fenster einen violetten Chip mit dem verwendeten
+Waffensystem und dessen **maximal möglicher Reichweite**, z. B.
+`⚔ Heavy Beam Laser II ~74 km (+10 km Falloff)`; dieselbe Info erscheint als
+Log-Zeile. Die Berechnung nimmt den Worst Case an:
+
+- Munition mit dem höchsten Range-Multiplikator geladen (z. B. Aurora bei
+  Beam-Lasern, Spike bei Railguns — Killmails verraten die echte Ladung nicht),
+- alle relevanten Skills auf V (Sharpshooter, Missile Projection/Bombardment),
+- Hüllen-Range-Boni des geflogenen Schiffs — **ohne** Module, Rigs oder Booster.
+
+Abgedeckt sind Turrets (Optimal + Falloff) und Missiles (Flugzeit × Geschwindig-
+keit). Bei Drohnen, Smartbombs o. Ä. wird nur der Waffenname ohne Range gezeigt.
+Die Daten stammen aus einer beim Build gebündelten SDE-Tabelle
+(`eve_localwatcher/data/weapon_ranges.json`, regenerierbar mit
+`python tools/gen_weapon_ranges.py`) — zur Laufzeit fallen dafür keine
+zusätzlichen API-Calls an.
+
+## Cyno-Verdacht
+
+Der Threat-Check markiert Piloten mit dem typischen Profil eines **Cyno-Alts**
+mit einem roten `CYNO?`-Chip (plus Log-Zeile). Zwei Muster werden erkannt:
+
+- **junger Char** (< `fresh_char_days`) mit fast keinen Kills (bestehende Logik),
+- **alter Char** (> `cyno_min_age_days`, Default 1 Jahr) mit leerem Killboard
+  (≤ `cyno_max_kills`), der trotzdem in einer **Allianz** sitzt — ein geparkter,
+  hochgeskillter Zünd-Alt.
+
+Ein Cyno-Verdacht hebt die Einstufung des Piloten auf mindestens „medium";
+die Kopfzeile des Intel-Fensters zählt die Verdachtsfälle mit.
 
 ## Intel-Fenster (Threat-Check als Overlay)
 
