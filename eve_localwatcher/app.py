@@ -13,6 +13,7 @@ import webbrowser
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Optional
 
+from . import __version__
 from . import alarm, capture, color, localparse, ocr, sso, threatcheck, winutil
 from .config import Config, Region
 from .region_select import select_region
@@ -156,7 +157,7 @@ class App:
         ocr.configure(self.cfg.tesseract_cmd)
 
         self.root = tk.Tk()
-        self.root.title("Mister Lee's magischer Intelligentheit-Helfer")
+        self.root.title(f"Mister Lee's magischer Intelligentheit-Helfer — v{__version__}")
         # Final size is computed from the content in _fit_to_content() once the UI
         # is built, so the tallest tab is fully visible without manual resizing.
 
@@ -243,15 +244,36 @@ class App:
         self.v_intel_click = tk.BooleanVar(value=c.intel_click_through)
 
     # -------------------------------------------------------------------- UI
+    def _apply_theme(self) -> None:
+        """Modern dark look via the Sun-Valley ttk theme (sv-ttk). If the
+        package is missing, fall back to the classic 'clam' light theme —
+        everything keeps working, it just looks plainer."""
+        style = ttk.Style()
+        try:
+            import sv_ttk
+            sv_ttk.set_theme("dark")
+            self._dark = True
+        except Exception:
+            try:
+                style.theme_use("clam")
+            except tk.TclError:
+                pass
+            self._dark = False
+        self._theme_bg = style.lookup(".", "background") or \
+            ("#1c1c1c" if self._dark else "#f0f0f0")
+        self._theme_fg = "#e8e8e8" if self._dark else "#000000"
+        # panel colour of the intel window + log (slightly off the main bg)
+        self._panel_bg = "#1d1d20" if self._dark else self._theme_bg
+        self.root.configure(bg=self._theme_bg)
+        self.root.update_idletasks()
+        winutil.set_dark_titlebar(self.root, self._dark)
+
     def _build_ui(self) -> None:
         pad = {"padx": 8, "pady": 3}
         root = self.root
 
+        self._apply_theme()
         style = ttk.Style()
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
         style.configure("Start.TButton", font=("Segoe UI", 12, "bold"), padding=6)
         style.configure("TNotebook.Tab", padding=(14, 6))
         style.configure("Hint.TLabel", foreground="#b8860b")
@@ -284,8 +306,8 @@ class App:
         self.lbl_hint = ttk.Label(root, text="", style="Hint.TLabel", wraplength=460)
         self.lbl_hint.pack(fill="x", padx=12, pady=(0, 2))
         self.lbl_ocrwarn = tk.Label(
-            root, fg="#b8860b", cursor="hand2", anchor="w", justify="left",
-            wraplength=470, font=("Segoe UI", 9, "underline"),
+            root, fg="#b8860b", bg=self._theme_bg, cursor="hand2", anchor="w",
+            justify="left", wraplength=470, font=("Segoe UI", 9, "underline"),
             text="⚠ Tesseract-OCR nicht installiert — Header-Count & Haven-Counter "
                  "sind deaktiviert. Klicken zum Installieren.")
         self.lbl_ocrwarn.bind("<Button-1>", lambda _e: webbrowser.open(TESSERACT_URL))
@@ -361,7 +383,7 @@ class App:
         tip(btn_clr, TIPS["clear"])
         self.lbl_friendly = ttk.Label(f4, text="0 Farben")
         self.lbl_friendly.grid(row=1, column=0, columnspan=3, sticky="w", padx=6)
-        self.swatches = tk.Frame(f4)
+        self.swatches = tk.Frame(f4, bg=self._theme_bg)
         self.swatches.grid(row=2, column=0, columnspan=3, sticky="w", padx=6, pady=4)
 
         # Tag-Schwelle: presence gate ------------------------------------
@@ -374,7 +396,7 @@ class App:
         self.lbl_tagmin.grid(row=3, column=2, sticky="w", padx=6)
         tip(lbl_tag, TIPS["tagmin"])
         tip(sc_tag, TIPS["tagmin"])
-        self.tag_preview = tk.Frame(f4)
+        self.tag_preview = tk.Frame(f4, bg=self._theme_bg)
         self.tag_preview.grid(row=4, column=0, columnspan=3, sticky="w", padx=6, pady=2)
 
         # Toleranz: friendly-similarity ----------------------------------
@@ -387,7 +409,7 @@ class App:
         self.lbl_tol.grid(row=5, column=2, sticky="w", padx=6)
         tip(lbl_tol, TIPS["tol"])
         tip(sc_tol, TIPS["tol"])
-        self.tol_preview = tk.Frame(f4)
+        self.tol_preview = tk.Frame(f4, bg=self._theme_bg)
         self.tol_preview.grid(row=6, column=0, columnspan=3, sticky="w", padx=6, pady=2)
 
         # --- feature toggle: hostile Local alarm ---
@@ -549,6 +571,9 @@ class App:
         # --- log (own tab) ---
         self.log = tk.Text(tab_log, height=9, state="disabled", wrap="word",
                            font=("Consolas", 9), relief="flat")
+        if self._dark:
+            self.log.configure(bg=self._panel_bg, fg="#d8d8d8",
+                               insertbackground="#d8d8d8")
         self.log.pack(fill="both", expand=True, padx=6, pady=6)
 
     def _spin(self, parent, row, label, var, lo, hi, tip_key=None):
@@ -624,14 +649,14 @@ class App:
         return list(self.cfg.friendly_colors) or list(_DEMO_FRIENDLY)
 
     def _swatch_cell(self, parent, rgb, top, verdict, vcolor):
-        cell = tk.Frame(parent)
+        cell = tk.Frame(parent, bg=self._theme_bg)
         cell.pack(side="left", padx=3)
-        tk.Label(cell, text=top, font=("Segoe UI", 7),
+        tk.Label(cell, text=top, font=("Segoe UI", 7), bg=self._theme_bg,
                  foreground="#888").pack()
         tk.Frame(cell, bg="#%02x%02x%02x" % tuple(rgb), width=26, height=20,
                  highlightthickness=1, highlightbackground="#555").pack()
         tk.Label(cell, text=verdict, font=("Segoe UI", 7, "bold"),
-                 foreground=vcolor).pack()
+                 bg=self._theme_bg, foreground=vcolor).pack()
 
     def _render_tag_preview(self) -> None:
         for w in self.tag_preview.winfo_children():
@@ -650,7 +675,8 @@ class App:
             self._swatch_cell(self.tag_preview, rgb, f"val {val}", verdict, vcol)
         if not calibrated:
             tk.Label(self.tag_preview, text="  (Demo — bitte kalibrieren)",
-                     font=("Segoe UI", 7), foreground="#a70").pack(side="left")
+                     font=("Segoe UI", 7), bg=self._theme_bg,
+                     foreground="#b8860b").pack(side="left")
 
     def _render_tol_preview(self) -> None:
         for w in self.tol_preview.winfo_children():
@@ -678,7 +704,8 @@ class App:
             self._swatch_cell(self.tol_preview, rgb, f"d {d:.0f}", verdict, vcol)
         if not calibrated:
             tk.Label(self.tol_preview, text="  (Demo — bitte kalibrieren)",
-                     font=("Segoe UI", 7), foreground="#a70").pack(side="left")
+                     font=("Segoe UI", 7), bg=self._theme_bg,
+                     foreground="#b8860b").pack(side="left")
 
     # ----------------------------------------------------------- settings sync
     def _apply_settings_to_cfg(self) -> None:
@@ -1180,6 +1207,8 @@ class App:
         if getattr(self, "_threat_win", None) is None or not self._threat_win.winfo_exists():
             win = tk.Toplevel(self.root)
             win.title("Threat-Check")
+            win.configure(bg=self._panel_bg)
+            winutil.set_dark_titlebar(win, self._dark)
             sh = win.winfo_screenheight()
             geo = f"600x{min(760, sh - 80)}"   # tall by default; fitted after render
             pos = self.cfg.intel_pos
@@ -1196,12 +1225,13 @@ class App:
             self._threat_head.bind("<B1-Motion>", self._intel_drag_move)
             self._threat_head.bind("<ButtonRelease-1>", self._intel_drag_end)
             # scrollable rows area
-            outer = tk.Frame(win)
+            outer = tk.Frame(win, bg=self._panel_bg)
             outer.pack(fill="both", expand=True)
-            self._threat_canvas = tk.Canvas(outer, highlightthickness=0)
+            self._threat_canvas = tk.Canvas(outer, highlightthickness=0,
+                                            bg=self._panel_bg)
             sb = ttk.Scrollbar(outer, orient="vertical",
                                command=self._threat_canvas.yview)
-            self._threat_rows = tk.Frame(self._threat_canvas)
+            self._threat_rows = tk.Frame(self._threat_canvas, bg=self._panel_bg)
             self._threat_rows.bind("<Configure>", lambda _e: self._threat_canvas.configure(
                 scrollregion=self._threat_canvas.bbox("all")))
             self._threat_canvas.create_window((0, 0), window=self._threat_rows, anchor="nw")
@@ -1228,6 +1258,7 @@ class App:
             win.attributes("-alpha", max(20, int(self.v_intel_alpha.get())) / 100.0)
         except tk.TclError:
             pass
+        winutil.set_dark_titlebar(win, self._dark)
         hwnd = winutil.tk_hwnd(win)
         if hwnd:
             winutil.set_click_through(hwnd, bool(self.v_intel_click.get()))
@@ -1258,18 +1289,19 @@ class App:
             self.cfg.save()
 
     def _render_threat_row(self, p) -> None:
-        row = tk.Frame(self._threat_rows, bd=0)
+        bg = self._panel_bg
+        row = tk.Frame(self._threat_rows, bd=0, bg=bg)
         row.pack(fill="x", padx=8, pady=3)
         tk.Frame(row, bg=TIER_COLOR.get(p.tier, "#666"), width=10, height=40)\
             .pack(side="left", fill="y", padx=(0, 8))
-        mid = tk.Frame(row)
+        mid = tk.Frame(row, bg=bg)
         mid.pack(side="left", fill="x", expand=True)
         ent = " · ".join(x for x in (p.corp_name, p.alliance_name) if x) or "—"
-        tk.Label(mid, text=p.name, font=("Segoe UI", 11, "bold"), anchor="w")\
-            .pack(anchor="w")
-        tk.Label(mid, text=ent, font=("Segoe UI", 9), fg="#888", anchor="w")\
-            .pack(anchor="w")
-        chips = tk.Frame(mid)
+        tk.Label(mid, text=p.name, font=("Segoe UI", 11, "bold"), anchor="w",
+                 bg=bg, fg=self._theme_fg).pack(anchor="w")
+        tk.Label(mid, text=ent, font=("Segoe UI", 9), fg="#999", bg=bg,
+                 anchor="w").pack(anchor="w")
+        chips = tk.Frame(mid, bg=bg)
         chips.pack(anchor="w", pady=(2, 0))
         if p.danger is not None:
             self._chip(chips, f"Danger {p.danger}", p.tier)
@@ -1302,30 +1334,31 @@ class App:
                         "Module/Rigs/Booster.")
             tip(w, det)
         if p.recent_ships:
-            ships = tk.Frame(mid)
+            ships = tk.Frame(mid, bg=bg)
             ships.pack(anchor="w", pady=(3, 0))
-            tk.Label(ships, text="Zuletzt:", font=("Segoe UI", 8), fg="#888")\
-                .pack(side="left", padx=(0, 2))
+            tk.Label(ships, text="Zuletzt:", font=("Segoe UI", 8), fg="#999",
+                     bg=bg).pack(side="left", padx=(0, 2))
             for rs in p.recent_ships:
                 kill = rs.kind == "kill"
                 lab = tk.Label(ships, text=f"{rs.ship_name} {self._rel_age(rs.time)}",
                                font=("Segoe UI", 8, "underline"), cursor="hand2",
-                               fg="#2c8a4a" if kill else "#b3473a")
+                               bg=bg, fg="#3fa860" if kill else "#d0655a")
                 lab.pack(side="left", padx=2)
                 lab.bind("<Button-1>", lambda _e, u=rs.url: webbrowser.open(u))
                 tip(lab, ("Kill in diesem Schiff — klick: Killmail des Opfers"
                           if kill else
                           "Verlust dieses Schiffs — klick: sein Fitting"))
-        right = tk.Frame(row)
+        right = tk.Frame(row, bg=bg)
         right.pack(side="right")
         if p.character_id:
-            lnk = tk.Label(right, text="zKill ↗", fg="#3a7", cursor="hand2",
-                           font=("Segoe UI", 9, "underline"))
+            lnk = tk.Label(right, text="zKill ↗", fg="#4db98a", cursor="hand2",
+                           bg=bg, font=("Segoe UI", 9, "underline"))
             lnk.pack()
             lnk.bind("<Button-1>", lambda _e, c=p.character_id:
                      webbrowser.open(f"https://zkillboard.com/character/{c}/"))
         active = self._last_active_text(p.last_killmail_time)
-        tk.Label(right, text=active[0], font=("Segoe UI", 8), fg=active[1]).pack()
+        tk.Label(right, text=active[0], font=("Segoe UI", 8), fg=active[1],
+                 bg=bg).pack()
 
     def _last_active_text(self, iso) -> tuple:
         """(text, colour) for the last-active line — only counts the last 30 days."""
@@ -1337,8 +1370,8 @@ class App:
             except (ValueError, TypeError):
                 days = None
             if days is not None and days <= 30:
-                return (f"aktiv vor {self._rel_age(iso)}", "#2c8a4a")
-        return ("Keine Aktivität im letzten Monat", "#888")
+                return (f"aktiv vor {self._rel_age(iso)}", "#3fa860")
+        return ("Keine Aktivität im letzten Monat", "#999")
 
     @staticmethod
     def _rel_age(iso: str) -> str:

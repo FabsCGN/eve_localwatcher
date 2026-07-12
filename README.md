@@ -120,6 +120,12 @@ python -m eve_localwatcher
 
 ## 4. Die Oberfläche
 
+Die App nutzt ein **modernes dunkles Design** (Sun-Valley-Theme im
+Windows-11-Stil, inklusive dunkler Titelleiste). Der **Fenstertitel zeigt
+immer die Versionsnummer** an (z. B. „… — v2.0.0-beta.1"), damit du sofort
+siehst, welchen Stand eine .exe hat. Sollte das Theme-Paket einmal fehlen,
+startet die App trotzdem — dann nur im schlichten Standard-Look.
+
 Oben im Fenster sitzt eine **permanente Statusleiste**, die immer sichtbar
 bleibt, egal welcher Tab gerade offen ist:
 
