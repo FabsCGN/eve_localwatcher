@@ -96,6 +96,27 @@ def tk_hwnd(window) -> Optional[int]:
         return None
 
 
+def set_dark_titlebar(window, enabled: bool = True) -> None:
+    """Ask DWM to render a window's title bar dark (Windows 10 1809+).
+
+    Accepts a Tk window or a raw HWND. Silently does nothing on failure —
+    the app just keeps the default light title bar then.
+    """
+    try:
+        import ctypes
+        hwnd = window if isinstance(window, int) else tk_hwnd(window)
+        if not hwnd:
+            return
+        value = ctypes.c_int(1 if enabled else 0)
+        # DWMWA_USE_IMMERSIVE_DARK_MODE: 20 since 20H1, 19 on older builds
+        for attr in (20, 19):
+            if ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)) == 0:
+                break
+    except Exception:
+        pass
+
+
 def set_click_through(hwnd: int, on: bool) -> bool:
     """Toggle mouse click-through on a window (Windows only).
 
