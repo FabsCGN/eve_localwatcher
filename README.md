@@ -155,7 +155,16 @@ wieder leer ist.
   festlegen"** (nur den Zeilenbereich, ohne Spaltenköpfe), Sound + Lautstärke.
 - **Nur in der letzten Welle scharf:** die Spawn-Detektoren werten erst, wenn der
   Pocket-Counter die letzte Pocket erreicht hat. Sie **brauchen** also den
-  aktiven „Letzte Welle"-Counter.
+  aktiven „Letzte Welle"-Counter. Ist der Counter mittendrin kurz nicht lesbar
+  (Kamera, Verdeckung), bleiben die Detektoren bis zu **~60 s** scharf; ein
+  frischer Counter (`1/6`) beendet die letzte Welle sofort.
+- **„Erkennung testen"**: liest das Overview-Rechteck sofort aus und schreibt ins
+  Log, ob es als belegt erkannt würde — zum Prüfen einfach kurz den Filter
+  rausnehmen, damit etwas im Overview steht.
+- **Live-Diagnose:** die Statuszeile zeigt bei aktivierten Detektoren laufend
+  `Dread N px` / `Faction N px` (helle Pixel im Rechteck; `?` = Bereich nicht
+  auflösbar) sowie `LETZTE WELLE`, solange die Detektoren scharf sind. Das
+  Scharf-/Unscharf-Schalten wird zusätzlich geloggt.
 
 Alle laufen im selben Scan-Loop wie der Hostile-Scan; mehrere Alarme können
 gleichzeitig erscheinen (gestapelte Overlays).

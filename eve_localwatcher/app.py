@@ -16,7 +16,8 @@ from typing import Optional
 from . import alarm, capture, color, localparse, ocr, sso, threatcheck, winutil
 from .config import Config, Region
 from .region_select import select_region
-from .scanner import Scanner, TickResult, resolve_one, resolve_regions, sample_rows
+from .scanner import (Scanner, TickResult, probe_spawn_region, resolve_one,
+                      resolve_regions, sample_rows)
 from .ui_tooltip import attach as tip
 
 # Threat-panel colours per tier and the German labels for each warning flag.
@@ -164,6 +165,7 @@ class App:
         self._last_clip = None
         self._threat_win = None
         self._threat_profiles: list = []
+        self._lw_prev = False       # last-wave state last tick (for transition log)
 
         self.scanner = Scanner(
             self.cfg,
@@ -474,6 +476,7 @@ class App:
             f9, 0, "Dread / Titan", self.v_dread_on, self.v_dread_sound,
             self.v_dread_vol, self._set_dread_region, self._pick_dread_sound,
             self._fire_test_dread, lambda: self._place_overlay("dread"),
+            lambda: self._test_spawn_region("dread"),
             "dread_on", "dread_region", "dread_sound")
         ttk.Separator(f9, orient="horizontal").grid(
             row=5, column=0, columnspan=3, sticky="ew", padx=6, pady=6)
@@ -481,6 +484,7 @@ class App:
             f9, 6, "Faction (Battleship)", self.v_faction_on, self.v_faction_sound,
             self.v_faction_vol, self._set_faction_region, self._pick_faction_sound,
             self._fire_test_faction, lambda: self._place_overlay("faction"),
+            lambda: self._test_spawn_region("faction"),
             "faction_on", "faction_region", "faction_sound")
         self.lbl_spawn = ttk.Label(f9, text="", foreground="#888")
         self.lbl_spawn.grid(row=11, column=0, columnspan=3, sticky="w", padx=6,
@@ -574,7 +578,7 @@ class App:
 
     def _build_spawn_block(self, parent, base, title, v_on, v_sound, v_vol,
                            set_region, pick_sound, fire_test, place_popup,
-                           tip_on, tip_region, tip_sound) -> None:
+                           probe_test, tip_on, tip_region, tip_sound) -> None:
         """One Dread/Faction spawn-detector block, anchored at grid row ``base``
         (uses rows base..base+3)."""
         chk = ttk.Checkbutton(parent, text=title, variable=v_on,
@@ -597,6 +601,11 @@ class App:
             .grid(row=base + 2, column=0, sticky="w", padx=6, pady=3)
         ttk.Button(parent, text="Alarm testen", command=fire_test)\
             .grid(row=base + 2, column=1, sticky="w", padx=6, pady=3)
+        btn_probe = ttk.Button(parent, text="Erkennung testen", command=probe_test)
+        btn_probe.grid(row=base + 2, column=2, sticky="w", padx=4, pady=3)
+        tip(btn_probe, "Liest den Overview-Bereich JETZT aus und schreibt ins Log, "
+                       "ob er als belegt erkannt würde. Zum Prüfen etwas ins "
+                       "Overview holen (z. B. Filter kurz rausnehmen).")
         self._vol_slider(parent, base + 3, v_vol)
 
     # ----------------------------------------------------------- previews
@@ -1044,6 +1053,27 @@ class App:
         alarm.play(self.cfg.faction_sound_path, self.cfg.faction_volume / 100)
         self._show_overlay("faction", "Test — Faction-Spawn!")
 
+    def _test_spawn_region(self, which: str) -> None:
+        """Grab the detector's overview region right now and log the verdict."""
+        self._apply_settings_to_cfg()
+        region = (self.cfg.dread_region if which == "dread"
+                  else self.cfg.faction_region)
+        name = "Dread/Titan" if which == "dread" else "Faction"
+        try:
+            res = probe_spawn_region(self.cfg, region)
+        except Exception as e:
+            self._log(f"❌ {name}-Erkennungstest fehlgeschlagen: {e}")
+            return
+        if res is None:
+            self._log(f"❌ {name}: Overview-Bereich nicht gesetzt oder EVE-Fenster "
+                      f"nicht gefunden.")
+            return
+        lit, needed, populated = res
+        verdict = ("BELEGT — würde in der letzten Welle auslösen" if populated
+                   else "leer — kein Alarm")
+        self._log(f"🔍 {name}-Overview: {lit} helle Pixel "
+                  f"(Schwelle {needed}) → {verdict}")
+
     # ----------------------------------------------------------- threat-check
     def _refresh_ocr_warning(self) -> None:
         if ocr.available():
@@ -1402,7 +1432,23 @@ class App:
                  f"Zeilen {len(r.rows)}", f"Threats {threats}"]
         if self.cfg.haven_enabled and r.haven_stage is not None:
             parts.append(f"Haven {r.haven_stage}/{r.haven_total}")
+        if r.last_wave:
+            parts.append("LETZTE WELLE")
+        # Live pixel counts of the spawn-detector overviews ('?' = region not
+        # resolvable) so a mis-set region or threshold is visible at a glance.
+        if self.cfg.dread_enabled:
+            parts.append(f"Dread {r.dread_lit if r.dread_lit is not None else '?'}px")
+        if self.cfg.faction_enabled:
+            parts.append(
+                f"Faction {r.faction_lit if r.faction_lit is not None else '?'}px")
         self.lbl_metrics.config(text="   ·   ".join(parts))
+
+        if bool(r.last_wave) != self._lw_prev:
+            self._lw_prev = bool(r.last_wave)
+            if self._lw_prev:
+                self._log("🕐 Letzte Welle — Spawn-Detektoren scharf.")
+            elif self.cfg.dread_enabled or self.cfg.faction_enabled:
+                self._log("Spawn-Detektoren inaktiv (Site beendet / neuer Counter).")
 
     def _on_alarm(self, r: TickResult) -> None:
         # Hostile alarm (red overlay + primary sound) — only if that feature is on.
