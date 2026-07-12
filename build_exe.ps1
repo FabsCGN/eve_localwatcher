@@ -27,6 +27,7 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed `
     --collect-submodules mss `
     --collect-all sv_ttk `
     --add-data "eve_localwatcher\data\weapon_ranges.json;eve_localwatcher/data" `
+    --add-data "eve_localwatcher\data\map_graph.json;eve_localwatcher/data" `
     @iconArg `
     run.py
 

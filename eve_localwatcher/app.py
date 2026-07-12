@@ -14,8 +14,10 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Optional
 
 from . import __version__
-from . import alarm, capture, color, localparse, ocr, sso, threatcheck, winutil
+from . import (alarm, capture, chatlog, color, localparse, mapdata, ocr, sso,
+               threat, threatcheck, winutil)
 from .config import Config, Region
+from .radar import Radar
 from .region_select import select_region
 from .scanner import (Scanner, TickResult, probe_spawn_region, resolve_one,
                       resolve_regions, sample_rows)
@@ -125,7 +127,22 @@ TIPS = {
                      "oder leer lassen. Bleibt nur in deiner lokalen Config, wird "
                      "nicht mit dem Code verteilt.",
     "check_clip": "Lies die Zwischenablage (Strg+A/Strg+C in der Local-Member-"
-                  "liste) und prüfe alle nicht-blauen Piloten.",
+                  "liste) und prüfe alle nicht-blauen Piloten. Auch ein "
+                  "EINZELNER kopierter Name funktioniert.",
+    "radar_on": "Kill-Radar: verfolgt den zKillboard-Livefeed. Jeder Kill im "
+                "eingestellten Jump-Radius um dein System landet mit Auswertung "
+                "im Intel-Fenster (#zkill). Startet/stoppt mit ▶ Start.",
+    "radar_range": "Radius der Radar-Blase in Gate-Jumps (1–8) um dein System.",
+    "radar_system": "Dein Heimatsystem (exakter Name, z. B. K7D-II). Manuell "
+                    "gesetzt gewinnt es immer über das SSO-Standort-Folgen.",
+    "radar_follow": "Dein System automatisch per EVE-SSO verfolgen (folgt dir "
+                    "beim Jumpen). Braucht den Location-Scope — ggf. einmal neu "
+                    "einloggen. Leeres System-Feld nötig.",
+    "radar_channel": "Name deines Intel-Channels (exakt wie im Spiel, z. B. "
+                     "'OnlyQuerious. Intel'). Gemeldete Systeme in Radar-"
+                     "Reichweite werden ausgewertet (#intel), Rest ignoriert.",
+    "radar_sound": "Eigener WAV-Sound für die ANFLUG-Warnung (Pilot nähert "
+                   "sich nachweislich über ≥2 Sichtungen). Leer = System-Beep.",
     "clipwatch": "Zwischenablage automatisch überwachen: sobald du eine Local-"
                  "Namensliste kopierst, startet der Check von selbst.",
     "local_alarm": "Hostile-Local-Überwachung an/aus (Header-Count + Farb-Sampling). "
@@ -166,6 +183,7 @@ class App:
         self._last_clip = None
         self._threat_win = None
         self._threat_profiles: list = []
+        self._radar_tracks: dict = {}   # character_id -> PilotTrack snapshot
         self._lw_prev = False       # last-wave state last tick (for transition log)
 
         self.scanner = Scanner(
@@ -174,6 +192,7 @@ class App:
             on_alarm=lambda r: self._events.put(("alarm", r)),
             on_config_change=lambda: self._events.put(("cfgchange", None)),
         )
+        self.radar = Radar(self.cfg, self._events)
 
         self._build_vars()
         self._build_ui()
@@ -242,6 +261,14 @@ class App:
         self.v_intel_top = tk.BooleanVar(value=c.intel_topmost)
         self.v_intel_alpha = tk.DoubleVar(value=c.intel_alpha)
         self.v_intel_click = tk.BooleanVar(value=c.intel_click_through)
+        # kill radar + intel channel
+        self.v_radar_on = tk.BooleanVar(value=c.radar_enabled)
+        self.v_radar_range = tk.IntVar(value=c.radar_jump_range)
+        self.v_radar_system = tk.StringVar(value=c.radar_own_system)
+        self.v_radar_follow = tk.BooleanVar(value=c.radar_follow_location)
+        self.v_radar_channel = tk.StringVar(value=c.radar_intel_channel)
+        self.v_radar_sound = tk.StringVar(value=c.radar_sound_path or "")
+        self.v_radar_vol = tk.DoubleVar(value=c.radar_volume)
 
     # -------------------------------------------------------------------- UI
     def _apply_theme(self) -> None:
@@ -547,6 +574,57 @@ class App:
                        "prüfen. Friendlies (Corp/Allianz/Fleet) werden vorher "
                        "rausgefiltert.").pack(fill="x", padx=14, pady=(2, 0))
 
+        # --- kill radar + intel channel ---
+        f11 = ttk.LabelFrame(tab_threat, text="Kill-Radar & Intel-Kanal")
+        f11.pack(fill="x", **pad)
+        f11.columnconfigure(1, weight=1)
+        chk_rd = ttk.Checkbutton(f11, text="Kill-Radar aktivieren "
+                                           "(zKillboard-Livefeed)",
+                                 variable=self.v_radar_on,
+                                 command=self._update_ready)
+        chk_rd.grid(row=0, column=0, columnspan=2, sticky="w", padx=6, pady=3)
+        tip(chk_rd, TIPS["radar_on"])
+        self._spin(f11, 1, "Jump-Radius", self.v_radar_range, 1, 8, "radar_range")
+        lbl_rs = ttk.Label(f11, text="Eigenes System:")
+        lbl_rs.grid(row=2, column=0, sticky="w", padx=6, pady=2)
+        ent_rs = ttk.Entry(f11, textvariable=self.v_radar_system, width=16)
+        ent_rs.grid(row=2, column=1, sticky="w", padx=6)
+        self.lbl_radar_sys = ttk.Label(f11, text="", foreground="#888")
+        self.lbl_radar_sys.grid(row=2, column=2, sticky="w", padx=4)
+        tip(lbl_rs, TIPS["radar_system"])
+        tip(ent_rs, TIPS["radar_system"])
+        ent_rs.bind("<KeyRelease>", lambda _e: self._on_radar_system_change())
+        chk_rf = ttk.Checkbutton(f11, text="Standort per SSO folgen",
+                                 variable=self.v_radar_follow,
+                                 command=self._on_radar_system_change)
+        chk_rf.grid(row=3, column=0, columnspan=2, sticky="w", padx=6)
+        tip(chk_rf, TIPS["radar_follow"])
+        lbl_rc = ttk.Label(f11, text="Intel-Kanal:")
+        lbl_rc.grid(row=4, column=0, sticky="w", padx=6, pady=2)
+        ent_rc = ttk.Entry(f11, textvariable=self.v_radar_channel, width=26)
+        ent_rc.grid(row=4, column=1, sticky="ew", padx=6)
+        self.lbl_radar_chan = ttk.Label(f11, text="", foreground="#888")
+        self.lbl_radar_chan.grid(row=5, column=1, columnspan=2, sticky="w", padx=6)
+        tip(lbl_rc, TIPS["radar_channel"])
+        tip(ent_rc, TIPS["radar_channel"])
+        ent_rc.bind("<FocusOut>", lambda _e: self._refresh_radar_channel_status())
+        lbl_rsnd = ttk.Label(f11, text="Anflug-Sound:")
+        lbl_rsnd.grid(row=6, column=0, sticky="w", padx=6, pady=2)
+        ent_rsnd = ttk.Entry(f11, textvariable=self.v_radar_sound)
+        ent_rsnd.grid(row=6, column=1, sticky="ew", padx=6)
+        ttk.Button(f11, text="…", width=3, command=self._pick_radar_sound)\
+            .grid(row=6, column=2, sticky="w")
+        tip(lbl_rsnd, TIPS["radar_sound"])
+        tip(ent_rsnd, TIPS["radar_sound"])
+        self._vol_slider(f11, 7, self.v_radar_vol)
+        ttk.Button(f11, text="Popup platzieren",
+                   command=lambda: self._place_overlay("anflug"))\
+            .grid(row=8, column=0, sticky="w", padx=6, pady=3)
+        ttk.Button(f11, text="Alarm testen", command=self._fire_test_radar)\
+            .grid(row=8, column=1, sticky="w", padx=6, pady=3)
+        self._on_radar_system_change()
+        self._refresh_radar_channel_status()
+
         # --- intel floating window options ---
         f10 = ttk.LabelFrame(tab_threat, text="Intel-Fenster (Overlay)")
         f10.pack(fill="x", **pad)
@@ -743,6 +821,13 @@ class App:
         c.intel_topmost = bool(self.v_intel_top.get())
         c.intel_alpha = int(self.v_intel_alpha.get())
         c.intel_click_through = bool(self.v_intel_click.get())
+        c.radar_enabled = bool(self.v_radar_on.get())
+        c.radar_jump_range = max(1, min(8, int(self.v_radar_range.get())))
+        c.radar_own_system = self.v_radar_system.get().strip()
+        c.radar_follow_location = bool(self.v_radar_follow.get())
+        c.radar_intel_channel = self.v_radar_channel.get().strip()
+        c.radar_sound_path = self.v_radar_sound.get().strip() or None
+        c.radar_volume = int(self.v_radar_vol.get())
         c.save()
 
     # ----------------------------------------------------------- window pick
@@ -756,10 +841,14 @@ class App:
                 titles.append(title)
         self.cmb_window["values"] = titles
         cur = self.v_title.get().strip()
-        if cur not in titles and titles:
-            # Old default ("EVE") won't be a full title — adopt the first client.
-            if not cur or not any(cur.lower() in t.lower() for t in titles):
-                self.v_title.set(titles[0])
+        # Auto-adopt ONLY when nothing real is pinned yet (fresh install /
+        # generic "EVE"). A previously pinned full title must survive the
+        # client being closed — otherwise starting the tool before EVE would
+        # silently re-pin it to e.g. the launcher window.
+        if (not cur or cur == "EVE") and titles:
+            clients = [t for t in titles if t.lower().startswith("eve - ")]
+            if clients:
+                self.v_title.set(clients[0])
         self._on_window_pick()
 
     def _on_window_pick(self, _event=None) -> None:
@@ -974,17 +1063,36 @@ class App:
     def _missing_step(self) -> Optional[str]:
         """The next setup step, considering which features are enabled.
 
-        Start drives the scanner (Local-alarm / auto-threat / Haven); the manual
-        Threat-Check runs independently of Start.
+        Start drives the scanner (Local-alarm / auto-threat / Haven) and the
+        kill radar; the manual Threat-Check runs independently of Start.
         """
         c = self.cfg
-        if c.use_window_relative and \
+        local = c.local_alarm_enabled or c.auto_threat_enabled
+        if not (local or c.haven_enabled or c.radar_enabled):
+            return ("Kein Scan-Feature aktiv — Local-Alarm, Haven oder "
+                    "Kill-Radar aktivieren (Threat-Check läuft separat über "
+                    "seinen Button).")
+        # screen capture is only needed by the scan features, not the radar
+        if (local or c.haven_enabled) and c.use_window_relative and \
                 winutil.find_window_origin(c.window_title) is None:
             return "EVE-Fenster im Tab 'Erfassung' wählen."
-        local = c.local_alarm_enabled or c.auto_threat_enabled
-        if not (local or c.haven_enabled):
-            return ("Kein Scan-Feature aktiv — Local-Alarm oder Haven aktivieren "
-                    "(Threat-Check läuft separat über seinen Button).")
+        if c.radar_enabled:
+            if not mapdata.load():
+                return ("Kartendaten fehlen (map_graph.json) — Installation "
+                        "unvollständig.")
+            manual = c.radar_own_system.strip()
+            if manual and mapdata.id_for_name(manual) is None:
+                return (f"Radar: System '{manual}' unbekannt — Namen im Tab "
+                        f"'Threat-Check' korrigieren.")
+            if not manual:
+                if not c.radar_follow_location:
+                    return ("Radar: eigenes System eintragen oder 'Standort "
+                            "per SSO folgen' aktivieren.")
+                if not c.sso_character_id:
+                    return "Radar: Standort-Folgen braucht einen SSO-Login."
+                if sso.LOCATION_SCOPE not in c.sso_scopes:
+                    return ("Radar: einmal neu per SSO einloggen "
+                            "(Standort-Scope fehlt).")
         if local:
             if not c.capture_region.is_valid() and not c.header_region.is_valid():
                 return "Capture-Bereich im Tab 'Erfassung' festlegen."
@@ -1005,7 +1113,7 @@ class App:
 
     def _update_ready(self) -> None:
         """Enable Start only when set up; otherwise show the next step."""
-        if self.scanner.is_running():
+        if self._running():
             self.lbl_hint.config(text="")
             return
         self._apply_settings_to_cfg()
@@ -1013,9 +1121,15 @@ class App:
         self.btn_start.config(state=("disabled" if missing else "normal"))
         self.lbl_hint.config(text=("Nächster Schritt: " + missing) if missing else "")
 
+    def _running(self) -> bool:
+        return self.scanner.is_running() or self.radar.is_running()
+
     def _toggle(self) -> None:
-        if self.scanner.is_running():
+        if self._running():
             self.scanner.stop()
+            if self.radar.is_running():
+                self.radar.stop()
+                self._log("Radar gestoppt.")
             self.btn_start.config(text="▶  Start")
             self._set_banner("●  Gestoppt", "idle")
             self.lbl_metrics.config(text="")
@@ -1026,12 +1140,18 @@ class App:
         if self._missing_step():
             self._update_ready()
             return
-        self.scanner.start()
+        # scan features (screen capture) only when one of them is enabled
+        if self.cfg.local_alarm_enabled or self.cfg.auto_threat_enabled \
+                or self.cfg.haven_enabled:
+            self.scanner.start()
+            self._log(f"Scanner gestartet (Intervall "
+                      f"{self.cfg.scan_interval_ms} ms, "
+                      f"OCR={'an' if ocr.available() else 'aus'}).")
+        if self.cfg.radar_enabled:
+            self.radar.start()
         self.btn_start.config(text="⏸  Stop")
         self._set_banner("●  läuft …", "safe")
         self.lbl_hint.config(text="")
-        self._log(f"Scanner gestartet (Intervall {self.cfg.scan_interval_ms} ms, "
-                  f"OCR={'an' if ocr.available() else 'aus'}).")
 
     def _reset_baseline(self) -> None:
         self.cfg.baseline_count = self._current_count()
@@ -1081,6 +1201,58 @@ class App:
         self._apply_settings_to_cfg()
         alarm.play(self.cfg.faction_sound_path, self.cfg.faction_volume / 100)
         self._show_overlay("faction", "Test — Faction-Spawn!")
+
+    # ------------------------------------------------------------- kill radar
+    def _pick_radar_sound(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Anflug-Warnung-Sound (WAV)",
+            filetypes=[("WAV", "*.wav"), ("Alle", "*.*")])
+        if path:
+            self.v_radar_sound.set(path)
+
+    def _fire_test_radar(self) -> None:
+        self._apply_settings_to_cfg()
+        alarm.play(self.cfg.radar_sound_path, self.cfg.radar_volume / 100)
+        self._show_overlay("anflug", "Test — Pilot · 3 → 2 Jumps · Sabre")
+
+    def _on_radar_system_change(self) -> None:
+        """Live validation of the manual home-system entry."""
+        name = self.v_radar_system.get().strip()
+        if not name:
+            if self.v_radar_follow.get():
+                if sso.LOCATION_SCOPE in self.cfg.sso_scopes:
+                    self.lbl_radar_sys.config(text="per SSO", foreground="#1a7a3c")
+                else:
+                    self.lbl_radar_sys.config(
+                        text="⚠ neuer SSO-Login nötig (Standort-Scope)",
+                        foreground="#b8860b")
+            else:
+                self.lbl_radar_sys.config(text="", foreground="#888")
+            return
+        sid = mapdata.id_for_name(name)
+        if sid:
+            self.lbl_radar_sys.config(
+                text=f"✓ {mapdata.name_for_id(sid)}", foreground="#1a7a3c")
+        else:
+            self.lbl_radar_sys.config(text="unbekannt", foreground="#b8860b")
+
+    def _refresh_radar_channel_status(self) -> None:
+        channel = self.v_radar_channel.get().strip()
+        if not channel:
+            self.lbl_radar_chan.config(text="")
+            return
+        d = chatlog.find_chatlog_dir(self.cfg.radar_chatlog_dir)
+        if d is None:
+            self.lbl_radar_chan.config(text="⚠ Chatlog-Ordner nicht gefunden",
+                                       foreground="#b8860b")
+            return
+        f = chatlog.newest_channel_file(d, channel)
+        if f is None:
+            self.lbl_radar_chan.config(
+                text="⚠ keine Logdatei — Kanal im Spiel geöffnet?",
+                foreground="#b8860b")
+        else:
+            self.lbl_radar_chan.config(text=f"✓ {f.name}", foreground="#1a7a3c")
 
     def _test_spawn_region(self, which: str) -> None:
         """Grab the detector's overview region right now and log the verdict."""
@@ -1145,6 +1317,9 @@ class App:
                 self.cfg.sso_refresh_token = tokens.get("refresh_token")
                 self.cfg.sso_character_id = info["character_id"]
                 self.cfg.sso_character_name = info.get("name")
+                scp = info.get("scopes")   # JWT scp: str for one, list for many
+                self.cfg.sso_scopes = scp if isinstance(scp, list) \
+                    else ([scp] if scp else [])
                 self.cfg.save()
                 self._events.put(("sso_ok", info.get("name")))
             except Exception as e:
@@ -1161,11 +1336,16 @@ class App:
         if not names:
             messagebox.showinfo("Keine Namen",
                                 "Zwischenablage enthält keine erkennbare Namensliste.\n"
-                                "In der Local-Memberliste Strg+A / Strg+C drücken.")
+                                "In der Local-Memberliste Strg+A / Strg+C drücken — "
+                                "oder einen einzelnen Pilotennamen kopieren.")
             return
-        if not localparse.looks_like_namelist(text) and not messagebox.askyesno(
-                "Unsicher", "Sieht nicht klar nach einer Namensliste aus. "
-                            "Trotzdem prüfen?"):
+        # exactly one valid name = a deliberately copied single pilot — check
+        # it straight away; the "is this really a list?" nag is only for
+        # ambiguous multi-line content
+        if len(names) > 1 and not localparse.looks_like_namelist(text) \
+                and not messagebox.askyesno(
+                    "Unsicher", "Sieht nicht klar nach einer Namensliste aus. "
+                                "Trotzdem prüfen?"):
             return
         self._run_threat_check(names)
 
@@ -1176,7 +1356,12 @@ class App:
                                        "ausführen?"):
                 return
         self._threat_profiles = []
-        self._show_threat_panel(len(names))
+        if self.radar.is_running():
+            # feed mode: keep the radar history, checked pilots fold into it
+            self._ensure_threat_panel()
+            self._render_feed()
+        else:
+            self._show_threat_panel(len(names))
 
         def work():
             try:
@@ -1204,6 +1389,13 @@ class App:
 
     # ---- threat panel window ----
     def _show_threat_panel(self, n_total: int) -> None:
+        self._ensure_threat_panel()
+        for w in self._threat_rows.winfo_children():
+            w.destroy()
+        self._threat_head.config(text=f"Prüfe {n_total} Piloten …", bg="#444")
+
+    def _ensure_threat_panel(self) -> None:
+        """Create (or re-show) the intel window without clearing its rows."""
         if getattr(self, "_threat_win", None) is None or not self._threat_win.winfo_exists():
             win = tk.Toplevel(self.root)
             win.title("Threat-Check")
@@ -1243,9 +1435,6 @@ class App:
             self._threat_win.deiconify()
             self._threat_win.lift()
             self._apply_intel_window_opts()
-        for w in self._threat_rows.winfo_children():
-            w.destroy()
-        self._threat_head.config(text=f"Prüfe {n_total} Piloten …", bg="#444")
 
     # ---- intel floating-window options ----
     def _apply_intel_window_opts(self) -> None:
@@ -1288,7 +1477,10 @@ class App:
             self.cfg.intel_pos = [win.winfo_x(), win.winfo_y()]
             self.cfg.save()
 
-    def _render_threat_row(self, p) -> None:
+    def _render_threat_row(self, p, extra=None) -> None:
+        """One pilot row. ``extra`` (a radar PilotTrack) adds source tags and
+        the sighting trail; display data must live on p/extra, never in
+        render-time state (rows are re-rendered from the stores)."""
         bg = self._panel_bg
         row = tk.Frame(self._threat_rows, bd=0, bg=bg)
         row.pack(fill="x", padx=8, pady=3)
@@ -1303,6 +1495,16 @@ class App:
                  anchor="w").pack(anchor="w")
         chips = tk.Frame(mid, bg=bg)
         chips.pack(anchor="w", pady=(2, 0))
+        if extra is not None:
+            for src in sorted(extra.sources):
+                self._chip(chips, f"#{src}", "tag")
+            trail = self._trail_text(extra)
+            if trail:
+                tk.Label(mid, text=trail, font=("Segoe UI", 8), fg="#999",
+                         bg=bg, anchor="w").pack(anchor="w")
+        if extra is not None and p is not None and extra.profile is None:
+            tk.Label(mid, text="wird ausgewertet …", font=("Segoe UI", 8),
+                     fg="#777", bg=bg, anchor="w").pack(anchor="w")
         if p.danger is not None:
             self._chip(chips, f"Danger {p.danger}", p.tier)
         if p.gang_ratio is not None:
@@ -1360,6 +1562,53 @@ class App:
         tk.Label(right, text=active[0], font=("Segoe UI", 8), fg=active[1],
                  bg=bg).pack()
 
+    def _trail_text(self, track) -> str:
+        """Sighting trail like 'K7D-II (4 J, Sabre) vor 3 min ← V-LEKM (6 J) …'
+        — newest first, located sightings only (manual checks carry none)."""
+        parts = []
+        for s in track.sightings[:4]:
+            if s.system_id is None:
+                continue
+            bit = s.system_name
+            info = []
+            if s.jumps is not None:
+                info.append(f"{s.jumps} J")
+            if s.ship_name:
+                info.append(s.ship_name)
+            if info:
+                bit += f" ({', '.join(info)})"
+            age = self._rel_age(s.ts.isoformat())
+            if age:
+                bit += f" vor {age}"
+            parts.append(bit)
+        return "  ←  ".join(parts)
+
+    def _render_feed(self) -> None:
+        """Re-render the intel window as the radar history: one card per
+        pilot, newest activity on top."""
+        win = getattr(self, "_threat_win", None)
+        if not win or not win.winfo_exists():
+            return
+        for w in self._threat_rows.winfo_children():
+            w.destroy()
+        tracks = sorted(self._radar_tracks.values(),
+                        key=lambda t: t.last_update, reverse=True)
+        dangerous = 0
+        for tr in tracks:
+            p = tr.profile or threat.ThreatProfile(
+                name=tr.name, character_id=tr.character_id)
+            if p.tier in ("high", "medium"):
+                dangerous += 1
+            self._render_threat_row(p, extra=tr)
+        own = getattr(self.radar, "_own_system", None)
+        sysname = mapdata.name_for_id(own) if own else \
+            (self.cfg.radar_own_system or "?")
+        head = (f"Radar: {len(tracks)} Piloten · {dangerous} gefährlich · "
+                f"Bubble {sysname} ±{self.cfg.radar_jump_range}")
+        self._threat_head.config(
+            text=head, bg=TIER_COLOR["high"] if dangerous else "#444")
+        self._fit_intel_to_content()
+
     def _last_active_text(self, iso) -> tuple:
         """(text, colour) for the last-active line — only counts the last 30 days."""
         if iso:
@@ -1395,10 +1644,10 @@ class App:
     def _chip(self, parent, text, kind) -> tk.Label:
         bg = {"high": "#f3d0d0", "medium": "#f6e6c8", "low": "#d9ead0",
               "unknown": "#e2e0da", "info": "#d6e6f5",
-              "weapon": "#e6d5f5"}.get(kind, "#e2e0da")
+              "weapon": "#e6d5f5", "tag": "#d8dce4"}.get(kind, "#e2e0da")
         fg = {"high": "#791f1f", "medium": "#633806", "low": "#27500a",
               "unknown": "#444441", "info": "#0c447c",
-              "weapon": "#5a2d8a"}.get(kind, "#444441")
+              "weapon": "#5a2d8a", "tag": "#31405c"}.get(kind, "#444441")
         lab = tk.Label(parent, text=text, bg=bg, fg=fg, font=("Segoe UI", 8),
                        padx=6, pady=1)
         lab.pack(side="left", padx=2)
@@ -1467,8 +1716,15 @@ class App:
                     self._log(f"SSO-Login fehlgeschlagen: {payload}")
                     messagebox.showerror("SSO-Login", str(payload))
                 elif kind == "threat_row":
-                    self._threat_profiles.append(payload)
-                    self._render_threat_row(payload)
+                    if self.radar.is_running() and payload.character_id:
+                        # feed mode: the manual pilot becomes a #manuell card
+                        # via the radar's own radar_sighting event
+                        self.radar.note_manual_profile(payload)
+                    elif self.radar.is_running():
+                        self._log(f"Nicht auflösbar: {payload.name}")
+                    else:
+                        self._threat_profiles.append(payload)
+                        self._render_threat_row(payload)
                     if payload.recent_weapon_name:
                         msg = (f"⚔ {payload.name}: Kill vor "
                                f"{payload.recent_kill_min_ago} min mit "
@@ -1485,11 +1741,37 @@ class App:
                                   f"{payload.age_days if payload.age_days is not None else '?'}d alt, "
                                   f"Allianz: {payload.alliance_name or '—'}")
                 elif kind == "threat_done":
-                    self._threat_done(*payload)
+                    if self.radar.is_running():
+                        agg, _filtered = payload
+                        self._render_feed()
+                        self._log(f"Threat-Check: {agg['resolved']}/"
+                                  f"{agg['total']} geprüft — im Radar-Feed "
+                                  f"(#manuell).")
+                    else:
+                        self._threat_done(*payload)
                 elif kind == "threat_err":
                     self._log(f"Threat-Check Fehler: {payload}")
                     if getattr(self, "_threat_head", None):
                         self._threat_head.config(text=f"Fehler: {payload}", bg="#b30000")
+                elif kind == "radar_sighting":
+                    self._radar_tracks[payload.character_id] = payload
+                    self._ensure_threat_panel()
+                    self._render_feed()
+                elif kind == "radar_approach":
+                    track, prev_j, new_j = payload
+                    ship = next((s.ship_name for s in track.sightings
+                                 if s.ship_name), None)
+                    alarm.play(self.cfg.radar_sound_path,
+                               self.cfg.radar_volume / 100)
+                    detail = f"{track.name} · {prev_j} → {new_j} Jumps"
+                    if ship:
+                        detail += f" · {ship}"
+                    self._show_overlay("anflug", detail)
+                    self._log(f"⚠ ANFLUG: {detail}")
+                elif kind == "radar_status":
+                    self._log(str(payload))
+                elif kind == "radar_err":
+                    self._log(f"Radar: {payload}")
         except queue.Empty:
             pass
         self.root.after(120, self._poll_queue)
@@ -1584,6 +1866,7 @@ class App:
         "haven":   ("🏁  LETZTE WELLE", "#b3720a", "#fff0d6", 160),
         "dread":   ("🐉  DREAD / TITAN", "#6a1b9a", "#f0dcff", 280),
         "faction": ("🩸  FACTION-SPAWN", "#9a1b3a", "#ffd8e0", 400),
+        "anflug":  ("⚠  ANFLUG", "#b34700", "#ffe3cc", 520),
     }
 
     _OVERLAY_W, _OVERLAY_H = 460, 110
@@ -1724,6 +2007,7 @@ class App:
     def _on_close(self) -> None:
         try:
             self.scanner.stop()
+            self.radar.stop()
             self._apply_settings_to_cfg()
         finally:
             self.root.destroy()

@@ -4,7 +4,8 @@ Flow: build authorize URL with a PKCE challenge → open the browser → catch t
 redirect on a tiny local HTTP server → exchange the code for tokens → decode the
 JWT for the character id. Refresh tokens are stored in the config.
 
-Only the fleet-read scope is requested; corp/alliance come from the character's
+Requested scopes: fleet-read (friendly filter) and location-read (the kill
+radar follows your current system); corp/alliance come from the character's
 public affiliation, so no further scopes are needed.
 """
 from __future__ import annotations
@@ -25,7 +26,8 @@ AUTHORIZE = "https://login.eveonline.com/v2/oauth/authorize/"
 TOKEN = "https://login.eveonline.com/v2/oauth/token"
 CALLBACK_PORT = 8765
 REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/callback"
-DEFAULT_SCOPES = ["esi-fleets.read_fleet.v1"]
+LOCATION_SCOPE = "esi-location.read_location.v1"
+DEFAULT_SCOPES = ["esi-fleets.read_fleet.v1", LOCATION_SCOPE]
 
 _DONE_HTML = (
     "<html><body style='font-family:sans-serif;background:#111;"

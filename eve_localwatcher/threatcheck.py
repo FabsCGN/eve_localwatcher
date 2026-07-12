@@ -109,6 +109,48 @@ def _access_token(cfg: Config) -> Optional[str]:
     return token
 
 
+# public alias — the radar's location poller and friendly refresh use it too
+access_token = _access_token
+
+
+def enrich_one(esi: ESI, zk: ZKill, cfg: Config, name: str, cid: int,
+               corp_name: Optional[str], alliance_name: Optional[str]
+               ) -> threat.ThreatProfile:
+    """Full per-pilot enrichment (public record, zKill stats, recent ships,
+    recent-kill weapon range) into a scored ThreatProfile.
+
+    Shared by run_check and the radar's persistent enrichment worker — pass
+    long-lived ESI/ZKill instances there so their caches and the zKill
+    throttle survive across pilots.
+    """
+    try:
+        pub = esi.character(cid)
+    except Exception:
+        pub = None
+    zs = zk.stats(cid)
+    p = threat.assess(name, cid, pub, zs, corp_name, alliance_name,
+                      cfg.fresh_char_days, cfg.cyno_max_kills,
+                      cfg.cyno_min_age_days)
+    try:
+        p.recent_ships, p.last_killmail_time, weapon = _recent_ships(esi, zk, cid)
+    except Exception:
+        p.recent_ships = []
+        weapon = None
+    if weapon:
+        ship_id, wid, wname, mins = weapon
+        p.recent_weapon_name = wname
+        p.recent_kill_min_ago = mins
+        try:
+            info = weaponrange.max_range(ship_id, wid)
+        except Exception:
+            info = None
+        if info:
+            p.recent_weapon_range_km = info.range_km
+            p.recent_weapon_falloff_km = info.falloff_km
+            p.recent_weapon_charge = info.charge_name
+    return p
+
+
 def run_check(cfg: Config, names: List[str], on_progress: ProgressCB = None
               ) -> Tuple[List[threat.ThreatProfile], dict, bool]:
     """Returns (profiles_for_non_friendlies, aggregate, filtered_ok).
@@ -147,31 +189,8 @@ def run_check(cfg: Config, names: List[str], on_progress: ProgressCB = None
     ent = esi.names_for_ids(ent_ids) if ent_ids else {}
 
     for name, cid, corp_id, alliance_id in pending:
-        try:
-            pub = esi.character(cid)
-        except Exception:
-            pub = None
-        zs = zk.stats(cid)
-        p = threat.assess(name, cid, pub, zs, ent.get(corp_id),
-                          ent.get(alliance_id), cfg.fresh_char_days,
-                          cfg.cyno_max_kills, cfg.cyno_min_age_days)
-        try:
-            p.recent_ships, p.last_killmail_time, weapon = _recent_ships(esi, zk, cid)
-        except Exception:
-            p.recent_ships = []
-            weapon = None
-        if weapon:
-            ship_id, wid, wname, mins = weapon
-            p.recent_weapon_name = wname
-            p.recent_kill_min_ago = mins
-            try:
-                info = weaponrange.max_range(ship_id, wid)
-            except Exception:
-                info = None
-            if info:
-                p.recent_weapon_range_km = info.range_km
-                p.recent_weapon_falloff_km = info.falloff_km
-                p.recent_weapon_charge = info.charge_name
+        p = enrich_one(esi, zk, cfg, name, cid,
+                       ent.get(corp_id), ent.get(alliance_id))
         profiles.append(p)
         if on_progress:
             on_progress(p)

@@ -100,6 +100,17 @@ class ESI:
     def character(self, char_id: int) -> dict:
         return self._request("GET", f"{BASE}/characters/{int(char_id)}/")
 
+    def character_location(self, char_id: int, access_token: str) -> Optional[int]:
+        """Current solar_system_id of the character, or None.
+
+        Requires the esi-location.read_location.v1 scope; a 403 (scope not
+        granted) is raised for the caller to classify.
+        """
+        h = {"Authorization": f"Bearer {access_token}"}
+        data = self._request("GET", f"{BASE}/characters/{int(char_id)}/location/",
+                             headers=h)
+        return (data or {}).get("solar_system_id")
+
     def fleet_member_ids(self, char_id: int, access_token: str) -> set:
         """Character ids of everyone in the caller's current fleet (empty if not
         in a fleet). Requires the esi-fleets.read_fleet.v1 scope."""
