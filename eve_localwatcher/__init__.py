@@ -12,4 +12,4 @@ Detection is two-stage (see ``scanner.py``):
     in the whitelist — including an empty/untagged slot — is a threat.
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0-beta.1"
