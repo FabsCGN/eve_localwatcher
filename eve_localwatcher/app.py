@@ -603,9 +603,11 @@ class App:
             .grid(row=base + 2, column=1, sticky="w", padx=6, pady=3)
         btn_probe = ttk.Button(parent, text="Erkennung testen", command=probe_test)
         btn_probe.grid(row=base + 2, column=2, sticky="w", padx=4, pady=3)
-        tip(btn_probe, "Liest den Overview-Bereich JETZT aus und schreibt ins Log, "
-                       "ob er als belegt erkannt würde. Zum Prüfen etwas ins "
-                       "Overview holen (z. B. Filter kurz rausnehmen).")
+        tip(btn_probe, "Liest den Overview-Bereich JETZT aus und vergleicht ihn "
+                       "mit dem gelernten Leerzustand (Alarm = Veränderung, "
+                       "statischer Text wie 'Nothing Found' stört nicht). Zum "
+                       "Prüfen bei laufendem Scan etwas ins Overview holen "
+                       "(z. B. Filter kurz rausnehmen).")
         self._vol_slider(parent, base + 3, v_vol)
 
     # ----------------------------------------------------------- previews
@@ -1059,8 +1061,10 @@ class App:
         region = (self.cfg.dread_region if which == "dread"
                   else self.cfg.faction_region)
         name = "Dread/Titan" if which == "dread" else "Faction"
+        baseline = getattr(self.scanner, f"_{which}_baseline", None) \
+            if self.scanner.is_running() else None
         try:
-            res = probe_spawn_region(self.cfg, region)
+            res = probe_spawn_region(self.cfg, region, baseline)
         except Exception as e:
             self._log(f"❌ {name}-Erkennungstest fehlgeschlagen: {e}")
             return
@@ -1068,11 +1072,18 @@ class App:
             self._log(f"❌ {name}: Overview-Bereich nicht gesetzt oder EVE-Fenster "
                       f"nicht gefunden.")
             return
-        lit, needed, populated = res
-        verdict = ("BELEGT — würde in der letzten Welle auslösen" if populated
-                   else "leer — kein Alarm")
-        self._log(f"🔍 {name}-Overview: {lit} helle Pixel "
-                  f"(Schwelle {needed}) → {verdict}")
+        lit, changed, needed = res
+        if changed is not None:
+            verdict = ("BELEGT — würde in der letzten Welle auslösen"
+                       if changed >= needed else "wie Leerzustand — kein Alarm")
+            self._log(f"🔍 {name}-Overview: {changed} Pixel verändert ggü. "
+                      f"Leerzustand (Schwelle {needed}, {lit} helle gesamt) "
+                      f"→ {verdict}")
+        else:
+            self._log(f"🔍 {name}-Overview: Bereich OK, {lit} helle Pixel. "
+                      f"Der Leerzustand wird beim Scannen automatisch gelernt — "
+                      f"Alarm, wenn sich in der letzten Welle ≥{needed} Pixel "
+                      f"dagegen ändern.")
 
     # ----------------------------------------------------------- threat-check
     def _refresh_ocr_warning(self) -> None:
@@ -1474,12 +1485,15 @@ class App:
         if r.last_wave:
             parts.append("LETZTE WELLE")
         # Live pixel counts of the spawn-detector overviews ('?' = region not
-        # resolvable) so a mis-set region or threshold is visible at a glance.
+        # resolvable): bright pixels while learning the empty state, Δ = changed
+        # pixels vs. that baseline during the last wave (what actually triggers).
+        d = "Δ" if r.last_wave else ""
         if self.cfg.dread_enabled:
-            parts.append(f"Dread {r.dread_lit if r.dread_lit is not None else '?'}px")
+            parts.append(
+                f"Dread {d}{r.dread_lit if r.dread_lit is not None else '?'}px")
         if self.cfg.faction_enabled:
             parts.append(
-                f"Faction {r.faction_lit if r.faction_lit is not None else '?'}px")
+                f"Faction {d}{r.faction_lit if r.faction_lit is not None else '?'}px")
         self.lbl_metrics.config(text="   ·   ".join(parts))
 
         if bool(r.last_wave) != self._lw_prev:
