@@ -1519,9 +1519,17 @@ class App:
                 w = self._chip(chips, label, "high" if fl == "cyno"
                                else (p.tier if fl == "hunter" else "info"))
                 if fl == "cyno":
-                    tip(w, "Cyno-Alt-Profil: junger Char ohne Kills ODER alter "
-                           "Char (>1 Jahr) mit leerem Killboard in einer "
-                           "Allianz. Kann eine Capital-Eskalation zünden.")
+                    reasons = ["junger Char ohne Kills", "alter Char (>1 Jahr) "
+                               "mit leerem Killboard in einer Allianz"]
+                    if p.cyno_fitted_losses:
+                        reasons.append(f"{p.cyno_fitted_losses}× zuletzt mit "
+                                       "gefittetem Cyno gestorben")
+                    if p.cyno_capable_hulls:
+                        reasons.append(f"{p.cyno_capable_hulls} der letzten "
+                                       "Schiffe cyno-fähig")
+                    tip(w, "Cyno-Alt-Verdacht (eins reicht): " +
+                        " · ".join(reasons) +
+                        ". Kann eine Capital-Eskalation zünden.")
         if p.recent_weapon_name:
             label = f"⚔ {p.recent_weapon_name}"
             if p.recent_weapon_range_km:
@@ -1736,10 +1744,18 @@ class App:
                             msg += ")"
                         self._log(msg)
                     if "cyno" in payload.flags:
+                        reasons = []
+                        if payload.cyno_fitted_losses:
+                            reasons.append(
+                                f"{payload.cyno_fitted_losses}× Cyno gefittet")
+                        if payload.cyno_capable_hulls:
+                            reasons.append(
+                                f"{payload.cyno_capable_hulls} cyno-fähige Schiffe")
+                        detail = (" · " + ", ".join(reasons)) if reasons else ""
                         self._log(f"⚠ CYNO? {payload.name} — "
                                   f"{payload.ships_destroyed} Kills, "
                                   f"{payload.age_days if payload.age_days is not None else '?'}d alt, "
-                                  f"Allianz: {payload.alliance_name or '—'}")
+                                  f"Allianz: {payload.alliance_name or '—'}{detail}")
                 elif kind == "threat_done":
                     if self.radar.is_running():
                         agg, _filtered = payload

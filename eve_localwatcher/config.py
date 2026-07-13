@@ -120,6 +120,9 @@ class Config:
     fresh_char_days: int = 90        # char younger than this → fresh-char warning
     cyno_max_kills: int = 5          # ≤ this many kills counts as "empty board"
     cyno_min_age_days: int = 365     # older + empty board + alliance → cyno suspect
+    cyno_scan_depth: int = 30        # recent killmails scanned for cyno signals
+    cyno_fitted_min_losses: int = 5  # ≥ this many recent losses with a cyno → flag
+    cyno_capable_min_ships: int = 6  # ≥ this many recent cyno-capable hulls → flag
 
     # --- Kill radar + intel channel (opt-in, network) ---------------------
     radar_enabled: bool = False
@@ -182,6 +185,9 @@ class Config:
             "fresh_char_days": self.fresh_char_days,
             "cyno_max_kills": self.cyno_max_kills,
             "cyno_min_age_days": self.cyno_min_age_days,
+            "cyno_scan_depth": self.cyno_scan_depth,
+            "cyno_fitted_min_losses": self.cyno_fitted_min_losses,
+            "cyno_capable_min_ships": self.cyno_capable_min_ships,
             "radar_enabled": self.radar_enabled,
             "radar_jump_range": self.radar_jump_range,
             "radar_own_system": self.radar_own_system,
@@ -254,6 +260,11 @@ class Config:
         c.fresh_char_days = d.get("fresh_char_days", c.fresh_char_days)
         c.cyno_max_kills = d.get("cyno_max_kills", c.cyno_max_kills)
         c.cyno_min_age_days = d.get("cyno_min_age_days", c.cyno_min_age_days)
+        c.cyno_scan_depth = d.get("cyno_scan_depth", c.cyno_scan_depth)
+        c.cyno_fitted_min_losses = d.get("cyno_fitted_min_losses",
+                                         c.cyno_fitted_min_losses)
+        c.cyno_capable_min_ships = d.get("cyno_capable_min_ships",
+                                         c.cyno_capable_min_ships)
         c.radar_enabled = d.get("radar_enabled", c.radar_enabled)
         c.radar_jump_range = d.get("radar_jump_range", c.radar_jump_range)
         c.radar_own_system = d.get("radar_own_system", c.radar_own_system)

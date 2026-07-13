@@ -271,6 +271,46 @@ def build_ewar_ids(cur) -> list:
     return sorted(tid for (tid,) in cur.execute(q, EWAR_GROUP_PATTERNS))
 
 
+# ship-fitting restriction attributes on a module: which groups/types may fit it
+_CAN_FIT_GROUP_ATTRS = list(range(1298, 1302)) + [1872, 1879, 1880, 1881, 2065,
+                                                  2396] + list(range(2476, 2486))
+_CAN_FIT_TYPE_ATTRS = [1302, 1303, 1304, 1305, 1944, 2103, 2463, 2486, 2487,
+                       2488, 2758, 5948]
+
+
+def build_cyno(cur) -> tuple:
+    """(cyno_module_type_ids, cyno_capable_ship_type_ids).
+
+    Cyno modules (normal/covert/industrial, no structure/blueprint) and — via
+    their ``canFitShipGroup``/``canFitShipType`` restrictions — exactly the
+    published ships that can mount one. Purely SDE-derived, so "cyno capable"
+    means what the game data says, not a hand-kept list."""
+    mods = [tid for (tid,) in cur.execute(
+        "SELECT typeID FROM invTypes WHERE published = 1 "
+        "AND typeName LIKE '%Cynosural Field Generator%' "
+        "AND typeName NOT LIKE '%Blueprint%' AND typeName NOT LIKE 'Standup%'")]
+    groups: set = set()
+    ships: set = set()
+    for mtid in mods:
+        for aid in _CAN_FIT_GROUP_ATTRS:
+            r = cur.execute("SELECT COALESCE(valueFloat, valueInt) FROM "
+                            "dgmTypeAttributes WHERE typeID=? AND attributeID=?",
+                            (mtid, aid)).fetchone()
+            if r and r[0]:
+                groups.add(int(r[0]))
+        for aid in _CAN_FIT_TYPE_ATTRS:
+            r = cur.execute("SELECT COALESCE(valueFloat, valueInt) FROM "
+                            "dgmTypeAttributes WHERE typeID=? AND attributeID=?",
+                            (mtid, aid)).fetchone()
+            if r and r[0]:
+                ships.add(int(r[0]))
+    for g in groups:
+        for (tid,) in cur.execute(
+                "SELECT typeID FROM invTypes WHERE groupID=? AND published=1", (g,)):
+            ships.add(tid)
+    return sorted(mods), sorted(ships)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--sde", help="path to Fuzzwork sqlite (or .gz); downloads if omitted")
@@ -285,11 +325,14 @@ def main() -> None:
     weapons = build_weapons(cur, ids, vals)
     hulls = build_hulls(cur, args.report)
     ewar = build_ewar_ids(cur)
+    cyno_mods, cyno_ships = build_cyno(cur)
 
     data = {"version": 1,
             "sde": f"fuzzwork latest-sqlite, generated {datetime.date.today()}",
             "skills": SKILLS, "weapons": weapons, "hulls": hulls,
-            "ewar_type_ids": ewar}
+            "ewar_type_ids": ewar,
+            "cyno_module_type_ids": cyno_mods,
+            "cyno_capable_ship_type_ids": cyno_ships}
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(data, separators=(",", ":"), sort_keys=True),
@@ -297,7 +340,8 @@ def main() -> None:
     n_t = sum(1 for w in weapons.values() if w["kind"] == "turret")
     n_m = len(weapons) - n_t
     print(f"wrote {out} — {n_t} turrets, {n_m} launchers, {len(hulls)} hulls "
-          f"with range traits, {len(ewar)} e-war modules "
+          f"with range traits, {len(ewar)} e-war modules, "
+          f"{len(cyno_mods)} cyno modules, {len(cyno_ships)} cyno-capable ships "
           f"({out.stat().st_size / 1024:.0f} KB)")
 
 

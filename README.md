@@ -127,7 +127,7 @@ python -m eve_localwatcher
 
 Die App nutzt ein **modernes dunkles Design** (Sun-Valley-Theme im
 Windows-11-Stil, inklusive dunkler Titelleiste). Der **Fenstertitel zeigt
-immer die Versionsnummer** an (z. B. „… — v2.0.0-beta.2"), damit du sofort
+immer die Versionsnummer** an (z. B. „… — v2.0.0-beta.3"), damit du sofort
 siehst, welchen Stand eine .exe hat. Sollte das Theme-Paket einmal fehlen,
 startet die App trotzdem — dann nur im schlichten Standard-Look.
 
@@ -471,8 +471,8 @@ Ein „Cyno-Alt" ist ein Charakter, der hauptsächlich dafür existiert, ein
 Sprungfeuer (Cynosural Field) zu zünden und damit gegnerischen Kapitalschiffen
 den Weg zu öffnen — oft unauffällig, bis es zu spät ist. Der Threat-Check
 markiert Piloten mit einem typischen Cyno-Alt-Profil mit einem auffälligen,
-**roten `CYNO?`-Chip**. Zwei unterschiedliche verdächtige Profile werden
-erkannt:
+**roten `CYNO?`-Chip**. **Sobald eines** der folgenden Muster zutrifft, wird
+der Chip gesetzt:
 
 1. **Junger Charakter mit fast keinen Kills** — jünger als die eingestellte
    „Frischer Char"-Schwelle (Standard 90 Tage) und kaum Kämpfe auf dem
@@ -482,15 +482,24 @@ erkannt:
    einer Allianz. Das ist das Bild eines gezielt hochtrainierten, geparkten
    Alts, der monate- oder jahrelang „schläft" und nur für den einen Zünd-
    Moment aktiviert wird.
+3. **Mehrfach mit gefittetem Cyno gestorben** — unter den letzten ~30
+   Verlusten hatten **mindestens 5** tatsächlich ein Cynosural-Field-Modul
+   im Fitting. Härtester Beweis: Der Char hat nachweislich wiederholt einen
+   Cyno geflogen.
+4. **Fliegt überwiegend cyno-fähige Schiffe** — **mehr als 5** der letzten
+   ~30 gezeigten Schiffe sind Hüllen, die überhaupt einen Cyno tragen können
+   (Force Recon, Black Ops, Covert Ops, Stealth Bomber, HIC, Strategic
+   Cruiser, Blockade Runner, Deep Space Transport, Hauler). Welche Schiffe
+   „cyno-fähig" sind, wird direkt aus den EVE-Spieldaten abgeleitet.
 
 Ein Cyno-Verdacht hebt die Gesamteinstufung des Piloten automatisch auf
 mindestens „mittel" an — er wird also nie als harmlos dargestellt, nur weil
-sonst nichts Auffälliges vorliegt. Die Kopfzeile des Intel-Fensters zählt
-die Verdachtsfälle zusätzlich mit.
+sonst nichts Auffälliges vorliegt. Der Chip-Tooltip nennt den konkreten
+Grund; die Kopfzeile des Intel-Fensters zählt die Verdachtsfälle mit.
 
-Beide Schwellen (wie viele Kills noch als „fast keine" gelten, ab welchem
-Alter ein Charakter als „alt" zählt) lassen sich über die Konfigurationsdatei
-anpassen, siehe [Abschnitt 17](#17-konfigurationsdatei).
+Alle Schwellen (Kill-/Altersgrenzen, die 5 Cyno-Verluste, die >5 cyno-fähigen
+Schiffe, die Scan-Tiefe von 30 Killmails) lassen sich über die
+Konfigurationsdatei anpassen, siehe [Abschnitt 17](#17-konfigurationsdatei).
 
 ---
 
@@ -612,7 +621,8 @@ nachschauen oder anpassen möchten, hier die wichtigsten Felder:
 | `haven_expected_total` | Erwartete Anzahl Pockets (Standard 6) — Plausibilitätsprüfung |
 | `spawn_brightness_thr`, `spawn_min_bright_px` | Empfindlichkeit der Spawn-Erkennung (siehe Abschnitt 9.2) |
 | `intel_*` | Position, Transparenz, „Immer oben", „Klick-durch" des Intel-Fensters |
-| `cyno_max_kills`, `cyno_min_age_days` | Schwellen für den Cyno-Verdacht (Standard: 5 Kills, 365 Tage) |
+| `cyno_max_kills`, `cyno_min_age_days` | Cyno-Verdacht Alter/Kills (Standard: 5 Kills, 365 Tage) |
+| `cyno_scan_depth`, `cyno_fitted_min_losses`, `cyno_capable_min_ships` | Cyno-Killboard-Beweise: wie viele Killmails gescannt werden (30), ab wie vielen Cyno-Verlusten (5) bzw. cyno-fähigen Schiffen (6) der Tag gesetzt wird |
 | `radar_*` | Kill-Radar: `radar_jump_range` (1–8), `radar_own_system`, `radar_follow_location`, `radar_intel_channel`, Sound/Lautstärke der Anflug-Warnung, Historien-Limits |
 | `auto_learn_enabled` | Standardmäßig **aus** — siehe Warnhinweis in Abschnitt 8 |
 

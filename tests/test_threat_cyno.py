@@ -58,3 +58,40 @@ def test_thresholds_are_configurable():
 def test_aggregate_counts_cyno():
     ps = [_assess(800, 0, "A"), _assess(800, 50, "A")]
     assert threat.aggregate(ps)["cyno"] == 1
+
+
+# --- killboard-evidence triggers (each alone is enough) --------------------
+def _clean():
+    """A pilot who passes none of the age/kill cyno triggers."""
+    return dict(name="Vet", char_id=1, char_pub=_pub(500),
+                zstats=_zstats(200), corp_name="C", alliance_name=None)
+
+
+def test_cyno_fitted_losses_triggers():
+    p = threat.assess(**_clean(), cyno_fitted_losses=5)
+    assert "cyno" in p.flags
+    assert p.cyno_fitted_losses == 5
+
+
+def test_cyno_fitted_below_threshold_no_flag():
+    assert "cyno" not in threat.assess(**_clean(), cyno_fitted_losses=4).flags
+
+
+def test_cyno_capable_hulls_triggers():
+    p = threat.assess(**_clean(), cyno_capable_hulls=6)
+    assert "cyno" in p.flags
+    assert p.cyno_capable_hulls == 6
+
+
+def test_cyno_capable_below_threshold_no_flag():
+    # "über 5" = strictly more than 5, so exactly 5 must NOT fire
+    assert "cyno" not in threat.assess(**_clean(), cyno_capable_hulls=5).flags
+
+
+def test_cyno_evidence_thresholds_configurable():
+    p = threat.assess(**_clean(), cyno_capable_hulls=3, cyno_capable_min=3)
+    assert "cyno" in p.flags
+
+
+def test_no_cyno_evidence_stays_clean():
+    assert "cyno" not in threat.assess(**_clean()).flags
