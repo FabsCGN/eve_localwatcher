@@ -94,3 +94,19 @@ def ewar_type_ids() -> FrozenSet[int]:
     if not d:
         return frozenset()
     return frozenset(int(t) for t in d.get("ewar_type_ids", []))
+
+
+def cyno_modules() -> FrozenSet[int]:
+    """Type ids of the Cynosural Field Generators (normal/covert/industrial)."""
+    d = load_data()
+    if not d:
+        return frozenset()
+    return frozenset(int(t) for t in d.get("cyno_module_type_ids", []))
+
+
+def cyno_capable_ships() -> FrozenSet[int]:
+    """Ship type ids that can mount any cyno (SDE canFitShipGroup/Type)."""
+    d = load_data()
+    if not d:
+        return frozenset()
+    return frozenset(int(t) for t in d.get("cyno_capable_ship_type_ids", []))

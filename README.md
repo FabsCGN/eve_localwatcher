@@ -5,7 +5,11 @@ deines laufenden EVE-Clients und schlägt **sofort Alarm, wenn ein
 nicht-befreundeter Pilot auftaucht** — nicht erst, wenn er etwas schreibt.
 Zusätzlich kann es beim Ratten/Havens den letzten Wave-Counter überwachen,
 Dread/Titan- oder Faction-Spawns erkennen, und jeden verdächtigen Piloten per
-Knopfdruck online nachschlagen (zKillboard, EVE-eigene Datenbank).
+Knopfdruck online nachschlagen (zKillboard, EVE-eigene Datenbank) — inklusive
+**Waffen-Reichweite aus seinem letzten Kill** und einer **Cyno-Alt-Warnung**.
+Ein **Kill-Radar** verfolgt zusätzlich Kills und deinen Intel-Kanal rund um
+dein System und warnt, wenn sich jemand nachweislich nähert — bevor er im
+Local steht.
 
 **Wichtig — was das Tool NICHT tut:** Es klickt nichts, tippt nichts und
 greift nie in das Spiel ein. Es macht nur **Screenshots eines kleinen
@@ -30,11 +34,12 @@ regelkonform nach der EVE-EULA.
 11. [Das Intel-Fenster im Detail](#11-das-intel-fenster-im-detail)
 12. [Waffen-Range-Intel](#12-waffen-range-intel)
 13. [Cyno-Verdacht](#13-cyno-verdacht)
-14. [Tab „Log"](#14-tab-log)
-15. [Alarm-Popups richtig platzieren](#15-alarm-popups-richtig-platzieren)
-16. [Konfigurationsdatei](#16-konfigurationsdatei)
-17. [Tipps & bekannte Fallstricke](#17-tipps--bekannte-fallstricke)
-18. [Für Entwickler](#18-für-entwickler)
+14. [Kill-Radar & Intel-Kanal](#14-kill-radar--intel-kanal)
+15. [Tab „Log"](#15-tab-log)
+16. [Alarm-Popups richtig platzieren](#16-alarm-popups-richtig-platzieren)
+17. [Konfigurationsdatei](#17-konfigurationsdatei)
+18. [Tipps & bekannte Fallstricke](#18-tipps--bekannte-fallstricke)
+19. [Für Entwickler](#19-für-entwickler)
 
 ---
 
@@ -122,7 +127,7 @@ python -m eve_localwatcher
 
 Die App nutzt ein **modernes dunkles Design** (Sun-Valley-Theme im
 Windows-11-Stil, inklusive dunkler Titelleiste). Der **Fenstertitel zeigt
-immer die Versionsnummer** an (z. B. „… — v2.0.0-beta.1"), damit du sofort
+immer die Versionsnummer** an (z. B. „… — v2.0.0-beta.3"), damit du sofort
 siehst, welchen Stand eine .exe hat. Sollte das Theme-Paket einmal fehlen,
 startet die App trotzdem — dann nur im schlichten Standard-Look.
 
@@ -138,7 +143,7 @@ bleibt, egal welcher Tab gerade offen ist:
   Hinweiszeile zeigt an, was noch fehlt.
 - **Alarm testen** — spielt Sound + Bildschirm-Overlay einmal probeweise ab.
 - **🔍 Debug** — schreibt einen Diagnose-Schnappschuss ins Log (siehe
-  [Tab „Log"](#14-tab-log)).
+  [Tab „Log"](#15-tab-log)).
 - **Baseline** — setzt die Referenzzahl für den Header-Count neu (nützlich
   nach manuellem Local-Wechsel).
 
@@ -241,7 +246,7 @@ Hier definierst du, was für Stufe 2 als „friendly" gilt.
   Hostile, der sich einfach nur ruhig verhält, würde nach der eingestellten
   Zeit fälschlich als „friendly" gelernt.
 - **„Hostile-Popup platzieren":** legt fest, wo das Alarm-Overlay auf dem
-  Bildschirm erscheint (siehe [Abschnitt 15](#15-alarm-popups-richtig-platzieren)).
+  Bildschirm erscheint (siehe [Abschnitt 16](#16-alarm-popups-richtig-platzieren)).
 
 Darunter folgen die Blöcke für **Letzte Welle** und die beiden
 **Spawn-Detektoren** — siehe nächster Abschnitt.
@@ -466,8 +471,8 @@ Ein „Cyno-Alt" ist ein Charakter, der hauptsächlich dafür existiert, ein
 Sprungfeuer (Cynosural Field) zu zünden und damit gegnerischen Kapitalschiffen
 den Weg zu öffnen — oft unauffällig, bis es zu spät ist. Der Threat-Check
 markiert Piloten mit einem typischen Cyno-Alt-Profil mit einem auffälligen,
-**roten `CYNO?`-Chip**. Zwei unterschiedliche verdächtige Profile werden
-erkannt:
+**roten `CYNO?`-Chip**. **Sobald eines** der folgenden Muster zutrifft, wird
+der Chip gesetzt:
 
 1. **Junger Charakter mit fast keinen Kills** — jünger als die eingestellte
    „Frischer Char"-Schwelle (Standard 90 Tage) und kaum Kämpfe auf dem
@@ -477,19 +482,90 @@ erkannt:
    einer Allianz. Das ist das Bild eines gezielt hochtrainierten, geparkten
    Alts, der monate- oder jahrelang „schläft" und nur für den einen Zünd-
    Moment aktiviert wird.
+3. **Mehrfach mit gefittetem Cyno gestorben** — unter den letzten ~30
+   Verlusten hatten **mindestens 5** tatsächlich ein Cynosural-Field-Modul
+   im Fitting. Härtester Beweis: Der Char hat nachweislich wiederholt einen
+   Cyno geflogen.
+4. **Fliegt überwiegend cyno-fähige Schiffe** — **mehr als 5** der letzten
+   ~30 gezeigten Schiffe sind Hüllen, die überhaupt einen Cyno tragen können
+   (Force Recon, Black Ops, Covert Ops, Stealth Bomber, HIC, Strategic
+   Cruiser, Blockade Runner, Deep Space Transport, Hauler). Welche Schiffe
+   „cyno-fähig" sind, wird direkt aus den EVE-Spieldaten abgeleitet.
 
 Ein Cyno-Verdacht hebt die Gesamteinstufung des Piloten automatisch auf
 mindestens „mittel" an — er wird also nie als harmlos dargestellt, nur weil
-sonst nichts Auffälliges vorliegt. Die Kopfzeile des Intel-Fensters zählt
-die Verdachtsfälle zusätzlich mit.
+sonst nichts Auffälliges vorliegt. Der Chip-Tooltip nennt den konkreten
+Grund; die Kopfzeile des Intel-Fensters zählt die Verdachtsfälle mit.
 
-Beide Schwellen (wie viele Kills noch als „fast keine" gelten, ab welchem
-Alter ein Charakter als „alt" zählt) lassen sich über die Konfigurationsdatei
-anpassen, siehe [Abschnitt 16](#16-konfigurationsdatei).
+Alle Schwellen (Kill-/Altersgrenzen, die 5 Cyno-Verluste, die >5 cyno-fähigen
+Schiffe, die Scan-Tiefe von 30 Killmails) lassen sich über die
+Konfigurationsdatei anpassen, siehe [Abschnitt 17](#17-konfigurationsdatei).
 
 ---
 
-## 14. Tab „Log"
+## 14. Kill-Radar & Intel-Kanal
+
+Das Radar macht das Tool **vorausschauend**: Statt erst zu warnen, wenn ein
+Feind im Local steht, beobachtet es, was **rund um dein System** passiert —
+über zwei automatische Quellen plus deine manuellen Checks, zusammengeführt
+in einer **Piloten-Historie** im Intel-Fenster.
+
+**Quelle 1 — Live-Kills (Tag `#zkill`):** Das Tool verfolgt den weltweiten
+Killmail-Livestream von zKillboard. Passiert ein Kill innerhalb deines
+eingestellten **Jump-Radius** (1–8 Sprünge um dein System), werden die
+beteiligten Angreifer automatisch ausgewertet — inklusive Waffen-Reichweite
+und Cyno-Verdacht — und erscheinen als Karte im Intel-Fenster. Eine
+Roaming-Gang hinterlässt fast immer eine Spur aus Kills auf dem Weg zu dir;
+so siehst du sie kommen, bevor sie da ist. (Reine NPC-Kills, deine eigenen
+Kills und Friendlies werden übersprungen; pro Kill werden maximal die
+5 relevantesten Angreifer ausgewertet.)
+
+**Quelle 2 — dein Intel-Kanal (Tag `#intel`):** Trage den exakten Namen
+deines Ingame-Intel-Channels ein (z. B. „OnlyQuerious. Intel"). Das Tool
+liest die Chat-Logdatei des Kanals live mit (EVE schreibt sie automatisch
+auf die Festplatte — auch das ist rein passiv). Meldet jemand ein System
+innerhalb deines Radius, werden die genannten Piloten ausgewertet; Systeme
+außerhalb werden ignoriert. Auch Kurzformen wie „P-Z" funktionieren, weil
+nur gegen die Systeme deiner Umgebung abgeglichen wird.
+
+**Quelle 3 — manuelle Checks (Tag `#manuell`):** Alles, was du per
+Zwischenablage oder Auto-Threat prüfst, reiht sich in dieselbe Historie ein.
+Übrigens: Es reicht jetzt auch, einen **einzelnen Pilotennamen** zu kopieren
+und „Local aus Zwischenablage prüfen" zu klicken.
+
+**Die Historie:** Im Intel-Fenster gibt es **eine Karte pro Pilot**, sortiert
+nach der neuesten Aktivität. Jede Karte zeigt die bekannte Bewertung (Danger,
+Hunter, CYNO?, Waffen-Range …), die Herkunfts-Tags und den
+**Sichtungs-Verlauf**, z. B. „8QT-H4 (2 J) vor 3 min ← V-3YG7 (4 J) vor
+8 min" — du siehst also wörtlich, wie sich jemand bewegt.
+
+**Die Anflug-Warnung:** Liegen von einem Piloten **mindestens zwei
+Sichtungen aus verschiedenen Systemen** vor und **sinkt** dabei seine
+Jump-Distanz zu dir, feuert ein separater Alarm („⚠ ANFLUG: Name · 3 → 2
+Jumps · Sabre") mit eigenem Sound, eigener Lautstärke und eigenem
+verschiebbarem Popup. Einmal gewarnt wird erst wieder gewarnt, wenn er noch
+näher kommt; dreht er ab, wird die Warnung neu scharf. Ein Pilot, der
+zweimal im selben System gemeldet wird, ist ein Camper — keine Anflug-Warnung.
+
+**Dein eigenes System** bestimmst du auf zwei Arten (Frame *Kill-Radar &
+Intel-Kanal* im Tab *Threat-Check*):
+
+- **Manuell eintragen** (z. B. „K7D-II") — gilt immer, ideal für stationäres
+  Ratten. Das Feld prüft live, ob der Name existiert.
+- **„Standort per SSO folgen"** — das Tool fragt deine Position alle paar
+  Sekunden über die offizielle EVE-API ab und zieht die Radar-Blase
+  automatisch mit, wenn du jumpst. Dafür braucht es eine zusätzliche
+  Berechtigung (Standort lesen): einmal neu über **EVE-SSO Login** anmelden,
+  falls das Tool darauf hinweist.
+
+Das Radar startet und stoppt mit dem **▶ Start**-Knopf wie alle anderen
+Module — braucht aber **keine** Bildschirm-Einrichtung: Du kannst es auch
+als einziges Feature laufen lassen. Alle Abfragen sind lesend und halten
+sich an die Etikette-Regeln der zKillboard-API.
+
+---
+
+## 15. Tab „Log"
 
 Ein zeitgestempeltes Protokoll aller wichtigen Ereignisse: ausgelöste
 Alarme (inkl. betroffenem Bereich und gesampelter Farbe), Kalibrierungen,
@@ -504,7 +580,7 @@ im Tab *Erkennung* gezielt nachjustieren.
 
 ---
 
-## 15. Alarm-Popups richtig platzieren
+## 16. Alarm-Popups richtig platzieren
 
 Die Bildschirmerfassung liest **Bildschirm-Pixel**. Legt sich ein
 Alarm-Popup zufällig über einen der Capture-Bereiche, liest der nächste Scan
@@ -522,7 +598,7 @@ liegen (am besten auf einem zweiten Monitor, falls vorhanden):
 
 ---
 
-## 16. Konfigurationsdatei
+## 17. Konfigurationsdatei
 
 Alle Einstellungen werden automatisch unter
 `%USERPROFILE%\.eve_localwatcher\config.json` gespeichert — du musst diese
@@ -545,12 +621,14 @@ nachschauen oder anpassen möchten, hier die wichtigsten Felder:
 | `haven_expected_total` | Erwartete Anzahl Pockets (Standard 6) — Plausibilitätsprüfung |
 | `spawn_brightness_thr`, `spawn_min_bright_px` | Empfindlichkeit der Spawn-Erkennung (siehe Abschnitt 9.2) |
 | `intel_*` | Position, Transparenz, „Immer oben", „Klick-durch" des Intel-Fensters |
-| `cyno_max_kills`, `cyno_min_age_days` | Schwellen für den Cyno-Verdacht (Standard: 5 Kills, 365 Tage) |
+| `cyno_max_kills`, `cyno_min_age_days` | Cyno-Verdacht Alter/Kills (Standard: 5 Kills, 365 Tage) |
+| `cyno_scan_depth`, `cyno_fitted_min_losses`, `cyno_capable_min_ships` | Cyno-Killboard-Beweise: wie viele Killmails gescannt werden (30), ab wie vielen Cyno-Verlusten (5) bzw. cyno-fähigen Schiffen (6) der Tag gesetzt wird |
+| `radar_*` | Kill-Radar: `radar_jump_range` (1–8), `radar_own_system`, `radar_follow_location`, `radar_intel_channel`, Sound/Lautstärke der Anflug-Warnung, Historien-Limits |
 | `auto_learn_enabled` | Standardmäßig **aus** — siehe Warnhinweis in Abschnitt 8 |
 
 ---
 
-## 17. Tipps & bekannte Fallstricke
+## 18. Tipps & bekannte Fallstricke
 
 - **Header- und Counter-Bereiche eng um die reine Zahl ziehen** — Icons oder
   Fortschrittsbalken im selben Rechteck stören die Texterkennung.
@@ -569,7 +647,7 @@ nachschauen oder anpassen möchten, hier die wichtigsten Felder:
 
 ---
 
-## 18. Für Entwickler
+## 19. Für Entwickler
 
 <details>
 <summary>Projektstruktur, Module, Tests (aufklappen)</summary>
@@ -592,12 +670,18 @@ eve_localwatcher/
   threat.py        # Bewertungslogik: ThreatProfile, Flags (Hunter/Fresh/Cyno/Scanner), Tier
   threatcheck.py   # Orchestriert Namen → ESI → zKillboard → ThreatProfile
   weaponrange.py   # Läuft zur Laufzeit: Waffenreichweite aus der gebündelten Datentabelle
+  mapdata.py       # Systemgraph (BFS-Jump-Distanzen, Bubble, Namensauflösung)
+  killfeed.py      # zKillboard-Livefeed (R2Z2, sequenzbasiert, ratenkonform)
+  chatlog.py       # EVE-Chatlog-Discovery (OneDrive-aware) + UTF-16-Tailing
+  intelparse.py    # Intel-Zeilen-Parser (System in Bubble + Pilot-Kandidaten)
+  radar.py         # Kill-Radar-Orchestrator (Threads, Sichtungen, Anflug-Logik)
   friendly.py      # Baut das Friendly-Set aus SSO-Affiliation + aktueller Fleet
   sso.py           # EVE-SSO-Login (OAuth2/PKCE)
   ui_tooltip.py     # Hover-Tooltip-Widget
 
 tools/
   gen_weapon_ranges.py   # Erzeugt data/weapon_ranges.json aus dem EVE-SDE (dev-only)
+  gen_map_graph.py       # Erzeugt data/map_graph.json (Systemgraph) aus dem SDE
 
 tests/            # pytest-Suite (Range-Mathematik, Cyno-Trigger, Spawn-Detektoren, ...)
 ```

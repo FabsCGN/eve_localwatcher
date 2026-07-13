@@ -1,12 +1,15 @@
-"""Recent-kill weapon extraction from stubbed ESI/zKill killmail data."""
+"""Recent-kill weapon extraction + cyno signals from stubbed killmail data."""
 from datetime import datetime, timedelta, timezone
 
-from eve_localwatcher import threatcheck
+from eve_localwatcher import threatcheck, weaponrange
 
 CHAR = 1001
 VICTIM = 2002
-SHIP = 33155      # Harbinger Navy Issue
+SHIP = 33155      # Harbinger Navy Issue (not cyno-capable)
 WEAPON = 3025     # Heavy Beam Laser II
+NON_CYNO_SHIP = 587   # Rifter — a T1 frigate, never cyno-capable
+CYNO_MOD = next(iter(weaponrange.cyno_modules()))
+CYNO_SHIP = next(iter(weaponrange.cyno_capable_ships()))
 
 
 def _iso(minutes_ago):
@@ -47,9 +50,13 @@ class StubZK:
         return [(i, "hash") for i in range(min(self.n, limit))]
 
 
+def _run_full(mails):
+    return threatcheck._recent_ships(StubESI(mails), StubZK(len(mails)), CHAR)
+
+
 def _run(mails):
-    esi = StubESI(mails)
-    return threatcheck._recent_ships(esi, StubZK(len(mails)), CHAR)
+    # backward-compatible 3-tuple for the weapon-focused tests
+    return _run_full(mails)[:3]
 
 
 def test_fresh_kill_yields_weapon():
@@ -90,3 +97,44 @@ def test_missing_timestamp_is_ignored():
     del km["killmail_time"]
     _s, _l, weapon = _run({0: km})
     assert weapon is None
+
+
+# --- cyno signal counting -------------------------------------------------
+def _cyno_loss(minutes_ago, fitted=True, ship=CYNO_SHIP):
+    items = [{"item_type_id": CYNO_MOD, "flag": 27}] if fitted else []
+    return {"killmail_time": _iso(minutes_ago),
+            "victim": {"character_id": CHAR, "ship_type_id": ship,
+                       "items": items},
+            "attackers": [{"character_id": 3003, "ship_type_id": NON_CYNO_SHIP}]}
+
+
+def test_cyno_fitted_and_capable_counted():
+    mails = {i: _cyno_loss(i * 2) for i in range(5)}
+    _s, _l, _w, cyno = _run_full(mails)
+    assert cyno.fitted_losses == 5
+    assert cyno.capable_hulls == 5      # each loss hull is cyno-capable
+    assert cyno.losses_seen == 5
+
+
+def test_cyno_in_cargo_not_fitted():
+    km = _cyno_loss(5)
+    km["victim"]["items"][0]["flag"] = 5    # Cargo, not a high slot
+    _s, _l, _w, cyno = _run_full({0: km})
+    assert cyno.fitted_losses == 0
+    assert cyno.capable_hulls == 1          # hull is still cyno-capable
+
+
+def test_non_cyno_ship_and_no_module():
+    km = _cyno_loss(5, fitted=False, ship=NON_CYNO_SHIP)
+    _s, _l, _w, cyno = _run_full({0: km})
+    assert cyno.fitted_losses == 0 and cyno.capable_hulls == 0
+
+
+def test_kill_in_cyno_hull_counts_capable_not_fitted():
+    # a KILL (char is attacker) flying a cyno-capable hull: capable, but a
+    # cyno-fitted count only comes from losses
+    km = {"killmail_time": _iso(5),
+          "victim": {"character_id": VICTIM, "ship_type_id": NON_CYNO_SHIP},
+          "attackers": [{"character_id": CHAR, "ship_type_id": CYNO_SHIP}]}
+    _s, _l, _w, cyno = _run_full({0: km})
+    assert cyno.capable_hulls == 1 and cyno.fitted_losses == 0

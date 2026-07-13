@@ -62,6 +62,8 @@ class ThreatProfile:
     recent_weapon_falloff_km: Optional[float] = None
     recent_weapon_charge: Optional[str] = None
     recent_kill_min_ago: Optional[int] = None
+    cyno_fitted_losses: int = 0        # recent losses that had a cyno fitted
+    cyno_capable_hulls: int = 0        # recent flown hulls that can fit a cyno
     flags: Set[str] = field(default_factory=set)   # hunter/fresh/cyno/scanner/unknown
     tier: str = "unknown"
     resolved: bool = True
@@ -100,9 +102,13 @@ def unresolved(name: str) -> ThreatProfile:
 def assess(name: str, char_id: Optional[int], char_pub: Optional[dict],
            zstats: Optional[dict], corp_name: Optional[str],
            alliance_name: Optional[str], fresh_days: int = 90,
-           cyno_max_kills: int = 5, cyno_min_age_days: int = 365) -> ThreatProfile:
+           cyno_max_kills: int = 5, cyno_min_age_days: int = 365,
+           cyno_fitted_losses: int = 0, cyno_capable_hulls: int = 0,
+           cyno_fitted_min: int = 5, cyno_capable_min: int = 6) -> ThreatProfile:
     p = ThreatProfile(name=name, character_id=char_id, corp_name=corp_name,
-                      alliance_name=alliance_name)
+                      alliance_name=alliance_name,
+                      cyno_fitted_losses=cyno_fitted_losses,
+                      cyno_capable_hulls=cyno_capable_hulls)
     p.age_days = _age_days((char_pub or {}).get("birthday"))
     z = zstats or {}
     p.danger = z.get("dangerRatio")
@@ -140,6 +146,13 @@ def assess(name: str, char_id: Optional[int], char_pub: Optional[dict],
     if (p.age_days is not None and p.age_days >= cyno_min_age_days
             and p.ships_destroyed <= cyno_max_kills
             and alliance_name):
+        p.flags.add("cyno")
+    # Hard evidence from the killboard (either alone is enough):
+    #  - repeatedly died with an actual cyno module fitted, or
+    #  - keeps flying cyno-capable hulls (recons/black ops/covert/transports).
+    if cyno_fitted_losses >= cyno_fitted_min:
+        p.flags.add("cyno")
+    if cyno_capable_hulls >= cyno_capable_min:
         p.flags.add("cyno")
     # scanner: dominant covops use, not a hunter, low/unknown danger (neutral hint)
     if ("hunter" not in p.flags and total_uses

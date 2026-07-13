@@ -120,6 +120,23 @@ class Config:
     fresh_char_days: int = 90        # char younger than this → fresh-char warning
     cyno_max_kills: int = 5          # ≤ this many kills counts as "empty board"
     cyno_min_age_days: int = 365     # older + empty board + alliance → cyno suspect
+    cyno_scan_depth: int = 30        # recent killmails scanned for cyno signals
+    cyno_fitted_min_losses: int = 5  # ≥ this many recent losses with a cyno → flag
+    cyno_capable_min_ships: int = 6  # ≥ this many recent cyno-capable hulls → flag
+
+    # --- Kill radar + intel channel (opt-in, network) ---------------------
+    radar_enabled: bool = False
+    radar_jump_range: int = 5        # bubble radius in gate jumps (1..8)
+    radar_own_system: str = ""       # manual home system name; wins over SSO
+    radar_follow_location: bool = False   # track own system via ESI location
+    radar_intel_channel: str = ""    # ingame intel channel name (chatlog tail)
+    radar_chatlog_dir: Optional[str] = None  # override; None = auto-discover
+    radar_sound_path: Optional[str] = None   # approach-warning WAV
+    radar_volume: int = 100
+    radar_max_pilots: int = 40       # history cap (pilot cards)
+    radar_sighting_max_min: int = 60 # prune sightings older than this
+    radar_max_enrich_per_kill: int = 5   # noise cap per killmail
+    sso_scopes: List[str] = field(default_factory=list)  # granted at last login
     sso_client_id: str = ""          # your EVE app client id (developers.eveonline.com)
     sso_refresh_token: Optional[str] = None   # stored after one-time SSO login
     sso_character_id: Optional[int] = None
@@ -168,6 +185,21 @@ class Config:
             "fresh_char_days": self.fresh_char_days,
             "cyno_max_kills": self.cyno_max_kills,
             "cyno_min_age_days": self.cyno_min_age_days,
+            "cyno_scan_depth": self.cyno_scan_depth,
+            "cyno_fitted_min_losses": self.cyno_fitted_min_losses,
+            "cyno_capable_min_ships": self.cyno_capable_min_ships,
+            "radar_enabled": self.radar_enabled,
+            "radar_jump_range": self.radar_jump_range,
+            "radar_own_system": self.radar_own_system,
+            "radar_follow_location": self.radar_follow_location,
+            "radar_intel_channel": self.radar_intel_channel,
+            "radar_chatlog_dir": self.radar_chatlog_dir,
+            "radar_sound_path": self.radar_sound_path,
+            "radar_volume": self.radar_volume,
+            "radar_max_pilots": self.radar_max_pilots,
+            "radar_sighting_max_min": self.radar_sighting_max_min,
+            "radar_max_enrich_per_kill": self.radar_max_enrich_per_kill,
+            "sso_scopes": list(self.sso_scopes),
             "sso_client_id": self.sso_client_id,
             "sso_refresh_token": self.sso_refresh_token,
             "sso_character_id": self.sso_character_id,
@@ -228,6 +260,26 @@ class Config:
         c.fresh_char_days = d.get("fresh_char_days", c.fresh_char_days)
         c.cyno_max_kills = d.get("cyno_max_kills", c.cyno_max_kills)
         c.cyno_min_age_days = d.get("cyno_min_age_days", c.cyno_min_age_days)
+        c.cyno_scan_depth = d.get("cyno_scan_depth", c.cyno_scan_depth)
+        c.cyno_fitted_min_losses = d.get("cyno_fitted_min_losses",
+                                         c.cyno_fitted_min_losses)
+        c.cyno_capable_min_ships = d.get("cyno_capable_min_ships",
+                                         c.cyno_capable_min_ships)
+        c.radar_enabled = d.get("radar_enabled", c.radar_enabled)
+        c.radar_jump_range = d.get("radar_jump_range", c.radar_jump_range)
+        c.radar_own_system = d.get("radar_own_system", c.radar_own_system)
+        c.radar_follow_location = d.get("radar_follow_location",
+                                        c.radar_follow_location)
+        c.radar_intel_channel = d.get("radar_intel_channel", c.radar_intel_channel)
+        c.radar_chatlog_dir = d.get("radar_chatlog_dir", c.radar_chatlog_dir)
+        c.radar_sound_path = d.get("radar_sound_path", c.radar_sound_path)
+        c.radar_volume = d.get("radar_volume", c.radar_volume)
+        c.radar_max_pilots = d.get("radar_max_pilots", c.radar_max_pilots)
+        c.radar_sighting_max_min = d.get("radar_sighting_max_min",
+                                         c.radar_sighting_max_min)
+        c.radar_max_enrich_per_kill = d.get("radar_max_enrich_per_kill",
+                                            c.radar_max_enrich_per_kill)
+        c.sso_scopes = [str(s) for s in d.get("sso_scopes", [])]
         c.sso_client_id = d.get("sso_client_id", c.sso_client_id)
         c.sso_refresh_token = d.get("sso_refresh_token", c.sso_refresh_token)
         c.sso_character_id = d.get("sso_character_id", c.sso_character_id)
@@ -258,14 +310,18 @@ class Config:
         c.tesseract_cmd = d.get("tesseract_cmd", c.tesseract_cmd)
         return c
 
-    def save(self, path: Path = CONFIG_PATH) -> None:
+    # Path defaults are resolved at CALL time (not bound at def time), so
+    # tests can point the module-level CONFIG_PATH at a sandbox file.
+    def save(self, path: Optional[Path] = None) -> None:
+        path = path or CONFIG_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
         tmp.replace(path)  # atomic on Windows for same-volume
 
     @classmethod
-    def load(cls, path: Path = CONFIG_PATH) -> "Config":
+    def load(cls, path: Optional[Path] = None) -> "Config":
+        path = path or CONFIG_PATH
         if not path.exists():
             return cls()
         try:
